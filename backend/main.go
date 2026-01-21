@@ -2,14 +2,17 @@ package main
 
 import (
 	"database/sql"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"text/template"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 )
 
@@ -28,7 +31,7 @@ type File struct {
 	OriginalName string     `db:"original_name"`
 	StoredPath   string     `db:"stored_path"`
 	MimeType     string     `db:"mime_type"`
-	SizeBytes    int        `db:"size_bytes"`
+	SizeBytes    int64      `db:"size_bytes"`
 	CreatedAt    time.Time  `db:"created_at"`
 	DeletedAt    *time.Time `db:"deleted_at"`
 }
@@ -72,8 +75,46 @@ func connectDB() (*sql.DB, error) {
 
 // cloud func
 
+func NewUUIDv4() string {
+	return uuid.NewString()
+}
+
+func uploadHandlerTEST(w http.ResponseWriter, r *http.Request) {
+	// Récupération des infos du fichier
+	file, fileheader, err := r.FormFile("file")
+
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer file.Close()
+
+	println(fileheader.Filename, fileheader.Size, fileheader.Header.Get("content-type"))
+
+	// Création du fichier vide
+	out, err := os.Create("../storage/" + fileheader.Filename)
+
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer out.Close()
+
+	// Copie du contenu dans le fichier précédement vide
+	_, err = io.Copy(out, file)
+
+	if err != nil {
+		log.Println(err)
+	}
+
+	defer out.Close()
+
+	// Redirection vers la page d'accueil
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
 func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
-	var f File
+	Struuid := NewUUIDv4()
 	folder_idstr := r.URL.Query().Get("folder_id")
 	Users_idstr := r.URL.Query().Get("Users_id")
 	Users_id, err := strconv.Atoi(Users_idstr)
@@ -87,34 +128,45 @@ func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f.UsersID = Users_id
-	f.FolderID = folder_id
+	file, fileheader, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "ERREUR dans la recuperation du fichier", http.StatusInternalServerError)
+		return
+	}
 
-	switch r.Method {
-	case http.MethodPost:
-		originalName := r.FormValue("originalName")
-		mimeType := r.FormValue("mimeType")
-		sizeBytesstr := r.FormValue("sizeBytes")
-		sizeBytes, err := strconv.Atoi(sizeBytesstr)
-		if err != nil {
-			http.Error(w, "convertion sizeBytes", http.StatusInternalServerError)
-			return
-		}
+	defer file.Close()
 
-		f.CreatedAt = time.Now()
-		f.OriginalName = originalName
-		f.SizeBytes = sizeBytes
-		f.MimeType = mimeType
-		f.StoredPath = "/" + Users_idstr + "/" + originalName
+	// Création du fichier vide
+	extension := filepath.Ext(fileheader.Filename)
+	out, err := os.Create("../storage/" + Users_idstr + "/" + Struuid + extension)
+	if err != nil {
+		http.Error(w, "ERREUR dans la creation du fichier", http.StatusInternalServerError)
+		return
+	}
 
-		_, err = db.Exec("INSERT INTO files (users_id,folder_id,original_name,stored_path,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?)",
-			&f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt)
-		if err != nil {
-			http.Error(w, "ERRERU d'insert DB", http.StatusInternalServerError)
-			return
-		}
-	default:
-		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+	defer out.Close()
+
+	// Copie du contenu dans le fichier précédement vide
+	ExactSizeBytes, err := io.Copy(out, file)
+	if err != nil {
+		http.Error(w, "ERREUR dans la copie du contenue", http.StatusInternalServerError)
+		return
+	}
+
+	f := File{
+		UsersID:      Users_id,
+		FolderID:     folder_id,
+		OriginalName: fileheader.Filename,
+		StoredPath:   "storage/" + Users_idstr + "/" + Struuid + extension,
+		MimeType:     fileheader.Header.Get("content-type"),
+		SizeBytes:    ExactSizeBytes,
+		CreatedAt:    time.Now(),
+	}
+
+	_, err = db.Exec("INSERT INTO files (users_id,folder_id,original_name,stored_path,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?)",
+		&f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt)
+	if err != nil {
+		http.Error(w, "ERROR d'insert DB", http.StatusInternalServerError)
 		return
 	}
 }
@@ -220,7 +272,8 @@ func main() {
 	// router web
 	http.HandleFunc("/", acceuilhandle)
 	http.HandleFunc("/login", loginhandle)
-	http.HandleFunc("/rgister", registerhandle)
+	http.HandleFunc("/register", registerhandle)
+	http.HandleFunc("/upload", uploadfilehandle)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
