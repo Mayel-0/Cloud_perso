@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +16,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
+	gomail "gopkg.in/gomail.v2"
 )
 
 // var and struct
@@ -21,8 +25,14 @@ import (
 var db *sql.DB
 var err error
 var tpl *template.Template
+var sessions = map[string]session{}
 
 // function de base
+
+type session struct {
+	userid int
+	expiry time.Time
+}
 
 type File struct {
 	ID           int        `db:"id"`
@@ -50,11 +60,57 @@ type PageData struct {
 	CurrentFolderID int
 }
 
+// SendEmail envoie un email générique.
+func SendEmail(to, subject, body string) error {
+	// Récupération de la config SMTP dans les variables d'environnement.
+	smtpHost := os.Getenv("SMTP_HOST")
+	smtpPortStr := os.Getenv("SMTP_PORT")
+	smtpUser := os.Getenv("SMTP_USER")
+	smtpPass := os.Getenv("SMTP_PASS")
+	from := os.Getenv("SMTP_FROM")
+
+	if smtpHost == "" || smtpPortStr == "" || smtpUser == "" || smtpPass == "" || from == "" {
+		return fmt.Errorf("configuration SMTP manquante (vérifie SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM)")
+	}
+
+	// Conversion du port en int.
+	var smtpPort int
+	_, err := fmt.Sscanf(smtpPortStr, "%d", &smtpPort)
+	if err != nil {
+		return fmt.Errorf("SMTP_PORT invalide: %w", err)
+	}
+
+	// Construction du message.
+	m := gomail.NewMessage()
+	m.SetHeader("From", from)
+	m.SetHeader("To", to)
+	m.SetHeader("Subject", subject)
+	m.SetBody("text/plain", body)
+
+	// Dialer SMTP.
+	d := gomail.NewDialer(smtpHost, smtpPort, smtpUser, smtpPass)
+
+	// Envoi.
+	if err := d.DialAndSend(m); err != nil {
+		return fmt.Errorf("send email: %w", err)
+	}
+
+	return nil
+}
+
+func SendVerificationEmail(to, code string) error {
+	subject := "Votre code de vérification"
+	body := "Voici votre code : " + code + "\nIl expire dans 5 minutes."
+	return SendEmail(to, subject, body)
+}
+
 func parseTemplates() (*template.Template, error) {
 	tpl, err = template.ParseFiles(
 		"../frontend/src/html/acceuil.html",
 		"../frontend/src/html/login.html",
 		"../frontend/src/html/register.html",
+		"../frontend/src/html/verify.html",
+		"../frontend/src/html/cloud_acceuil.html",
 	)
 	if err != nil {
 		println("ERREUR func PARSETEMPLATES")
@@ -90,19 +146,12 @@ func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
 	var rootId int
 	Struuid := NewUUIDv4()
 	folder_idstr := r.URL.Query().Get("folder_id")
-	/*Users_idstr := r.URL.Query().Get("Users_id")
-	Users_id, err := strconv.Atoi(Users_idstr)
-	if err != nil {
-		http.Error(w, "convertion Users_id", http.StatusInternalServerError)
-		return
-	} */
-	Users_idstr := r.FormValue("Users_id")
+	Users_idstr := r.URL.Query().Get("Users_id")
 	Users_id, err := strconv.Atoi(Users_idstr)
 	if err != nil {
 		http.Error(w, "convertion Users_id", http.StatusInternalServerError)
 		return
 	}
-	//temp
 
 	if folder_idstr != "" {
 		folder_id, err = strconv.Atoi(folder_idstr)
@@ -348,7 +397,7 @@ func deleteFileHandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func AffichageHandle(w http.ResponseWriter, r *http.Request) {
+func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 	var folder []Folder
 	var file []File
 	var folder_id int
@@ -370,6 +419,23 @@ func AffichageHandle(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			folder_id = 0
+		}
+
+		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err == sql.ErrNoRows {
+			root := "../storage/" + Users_idstr + "/" + "root"
+			if err = os.MkdirAll(root, 0755); err != nil {
+				http.Error(w, "ERREUR d'insert root", http.StatusInternalServerError)
+				return
+			}
+			_, err = db.Exec("INSERT INTO folders (users_id, nom, parent_id) VALUES (?, 'root', NULL)", &Users_id)
+			if err != nil {
+				log.Fatal(err)
+				http.Error(w, "ERREUR d'insert root", http.StatusInternalServerError)
+				return
+			}
+		} else if err != nil {
+			http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
+			return
 		}
 
 		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err != nil {
@@ -420,7 +486,7 @@ func AffichageHandle(w http.ResponseWriter, r *http.Request) {
 			Files:           file,
 			CurrentFolderID: folder_id,
 		}
-		if err = tpl.ExecuteTemplate(w, "acceuil.html", data); err != nil {
+		if err = tpl.ExecuteTemplate(w, "cloud_acceuil.html", data); err != nil {
 			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
 			return
 		}
@@ -428,6 +494,19 @@ func AffichageHandle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
+}
+
+func generateCode() (string, error) {
+	codes := make([]byte, 6)
+	if _, err := rand.Read(codes); err != nil {
+		return "", err
+	}
+
+	for i := 0; i < 6; i++ {
+		codes[i] = uint8(48 + (codes[i] % 10))
+	}
+
+	return string(codes), nil
 }
 
 // handlefunc
@@ -440,10 +519,137 @@ func loginhandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case http.MethodPost:
+		var MDPdp string
+		var User_id int
+		email := r.FormValue("email")
+		password := r.FormValue("password")
+
+		rows, err := db.Query("SELECT password_hash, id FROM users WHERE email = ?", email)
+		if err != nil {
+			fmt.Println("erreur de select db", err)
+			return
+		}
+		defer rows.Close()
+
+		if rows.Next() == false {
+			http.Error(w, "Mots de passe ou email incorrect", http.StatusUnauthorized)
+			return
+		} else {
+			//var emaildb strin
+			if err := rows.Scan(&MDPdp, &User_id); err != nil {
+				log.Fatal(err)
+			}
+		}
+		//fmt.Println(User_id)
+
+		if err := bcrypt.CompareHashAndPassword([]byte(MDPdp), []byte(password)); err != nil {
+			http.Error(w, "Mots de passe ou email incorrect", http.StatusUnauthorized)
+			return
+		}
+
+		Code, err := generateCode()
+		if err != nil {
+			fmt.Println("erreur de generation de code")
+			return
+		}
+
+		expiresAt := time.Now().Add(5 * time.Minute)
+
+		err = SendVerificationEmail(email, Code)
+		if err != nil {
+			fmt.Println("erreur dans l'envoie du mail")
+			return
+		}
+
+		_, err = db.Exec("INSERT INTO email_verification(users_id, verify_token, verify_expires_at, is_verified) VALUES (?,?,?,0)", User_id, Code, expiresAt)
+		if err != nil {
+			http.Error(w, "Probeme de l'insertion du tokken verification", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/verify?Users_id="+strconv.Itoa(User_id), http.StatusSeeOther)
+		return
 	default:
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
+}
+
+func verifyhandle(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		User_id_str := r.URL.Query().Get("Users_id")
+		userid, err := strconv.Atoi(User_id_str)
+		if err != nil || userid <= 0 {
+			http.Error(w, "err de convertion string", http.StatusBadRequest)
+			return
+		}
+		err = tpl.ExecuteTemplate(w, "verify.html", userid)
+		if err != nil {
+			http.Error(w, "Erreur de chargement login.html", http.StatusInternalServerError)
+		}
+	}
+	if r.Method == http.MethodPost {
+		code := r.FormValue("code")
+		User_id := r.FormValue("Users_id")
+		User_id_int, err := strconv.Atoi(User_id)
+		if err != nil {
+			http.Error(w, "err de convertion string", http.StatusBadRequest)
+			return
+		}
+
+		var verify_token string
+		var verify_expires_at time.Time
+		var is_verified int
+
+		err = db.QueryRow("SELECT verify_token, verify_expires_at, is_verified FROM email_verification WHERE users_id = ? ORDER BY id DESC LIMIT 1", User_id).Scan(&verify_token, &verify_expires_at, &is_verified)
+		if err != nil {
+			http.Error(w, "ERREUR de select db", http.StatusInternalServerError)
+			return
+		}
+		if is_verified != 0 || time.Now().After(verify_expires_at) || code != verify_token {
+			http.Error(w, "Code invalide ou expiré", http.StatusUnauthorized)
+			tpl, _ := parseTemplates()
+			tpl.ExecuteTemplate(w, "verify.html", nil)
+			return
+		}
+
+		_, err = db.Exec("UPDATE email_verification SET is_verified = 1 WHERE verify_token = ? AND users_id = ?", verify_token, User_id)
+		if err != nil {
+			http.Error(w, "SERVEUR ERREUR", http.StatusInternalServerError)
+			return
+		}
+
+		// we use the "github.com/google/uuid" library to generate UUIDs
+		sessionToken := uuid.NewString()
+		expiresAt := time.Now().Add(8 * time.Hour)
+
+		sessions[sessionToken] = session{
+			userid: User_id_int,
+			expiry: expiresAt,
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:    "session_token",
+			Value:   sessionToken,
+			Expires: expiresAt,
+		})
+		http.Redirect(w, r, "/cloud/acceuil/?Users_id="+User_id, http.StatusSeeOther)
+		return
+	}
+}
+
+func acceuilHandle(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		if err = tpl.ExecuteTemplate(w, "acceuil.html", nil); err != nil {
+			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
+			return
+		}
+	default:
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
 }
 
 func registerhandle(w http.ResponseWriter, r *http.Request) {
@@ -454,12 +660,58 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case http.MethodPost:
+		email := r.FormValue("email")
+		name := r.FormValue("name")
+		password := r.FormValue("password")
+		passwordV := r.FormValue("passwordV")
+
+		if password != passwordV {
+			http.Redirect(w, r, "/register?error=pass", http.StatusSeeOther)
+			return
+		}
+
+		hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			http.Error(w, "erreur dans le hashed du MDP", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = db.Exec("INSERT INTO users (email, password_hash, name) VALUES (?,?,?)", email, hashed, name)
+		if err != nil {
+			http.Error(w, "erreur d'insert db", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "login.html", http.StatusSeeOther)
+
 	default:
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
 }
 
+func Logouthandle(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		if err == http.ErrNoCookie {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	sessionToken := c.Value
+
+	delete(sessions, sessionToken)
+
+	http.SetCookie(w, &http.Cookie{
+		Name:    "session_token",
+		Value:   "",
+		Expires: time.Now(),
+	})
+
+	http.Redirect(w, r, "login.html", http.StatusSeeOther)
+}
 
 // main
 func main() {
@@ -483,9 +735,12 @@ func main() {
 	defer db.Close()
 
 	// router web
-	http.HandleFunc("/", AffichageHandle)
+	http.HandleFunc("/", acceuilHandle)
 	http.HandleFunc("/login", loginhandle)
 	http.HandleFunc("/register", registerhandle)
+	http.HandleFunc("/verify", verifyhandle)
+	http.HandleFunc("/cloud/acceuil/", CloudAcceuilHandle)
+	http.HandleFunc("/logout", Logouthandle)
 	http.HandleFunc("/upload", uploadfilehandle)
 	http.HandleFunc("/createfolder", folderCreationhandle)
 	http.HandleFunc("/deletefile", deleteFileHandle)
