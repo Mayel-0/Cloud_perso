@@ -320,6 +320,34 @@ func folderCreationhandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func deleteFileHandle(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		Users_idstr := r.URL.Query().Get("Users_id")
+		Users_id, err := strconv.Atoi(Users_idstr)
+		if err != nil {
+			http.Error(w, "convertion Users_id", http.StatusInternalServerError)
+			return
+		}
+		file_idstr := r.FormValue("file_id")
+		file_id, err := strconv.Atoi(file_idstr)
+		if err != nil {
+			http.Error(w, "convertion files_id", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = db.Exec("UPDATE files SET deleted_at = NOW() WHERE id = ? AND users_id = ?", &file_id, &Users_id)
+		if err != nil {
+			http.Error(w, "ERREUR de Update", http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+	if r.Method == http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
 func AffichageHandle(w http.ResponseWriter, r *http.Request) {
 	var folder []Folder
 	var file []File
@@ -432,6 +460,7 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+
 // main
 func main() {
 	// chargement .env
@@ -459,6 +488,7 @@ func main() {
 	http.HandleFunc("/register", registerhandle)
 	http.HandleFunc("/upload", uploadfilehandle)
 	http.HandleFunc("/createfolder", folderCreationhandle)
+	http.HandleFunc("/deletefile", deleteFileHandle)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
