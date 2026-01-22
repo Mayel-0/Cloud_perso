@@ -87,6 +87,7 @@ func NewUUIDv4() string {
 
 func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
 	var folder_id int
+	var rootId int
 	Struuid := NewUUIDv4()
 	folder_idstr := r.URL.Query().Get("folder_id")
 	/*Users_idstr := r.URL.Query().Get("Users_id")
@@ -122,10 +123,39 @@ func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// Création du fichier vide
+
+	if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err == sql.ErrNoRows {
+		root := "../storage/" + Users_idstr + "/" + "root"
+		if err = os.MkdirAll(root, 0755); err != nil {
+			http.Error(w, "ERREUR d'insert root", http.StatusInternalServerError)
+			return
+		}
+		_, err = db.Exec("INSERT INTO folders (users_id, nom, parent_id) VALUES (?, 'root', NULL)", &Users_id)
+		if err != nil {
+			log.Fatal(err)
+			http.Error(w, "ERREUR d'insert root", http.StatusInternalServerError)
+			return
+		}
+	} else if err != nil {
+		http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
+		return
+	}
+
+	if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err != nil {
+		log.Fatal(err)
+		http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
+		return
+	}
+
+	if folder_id == 0 {
+		folder_id = rootId
+	}
+
 	extension := filepath.Ext(fileheader.Filename)
 	userDir := "../storage/" + Users_idstr
 	os.MkdirAll(userDir, 0755)
-	out, err := os.Create("../storage/" + Users_idstr + "/" + Struuid + extension)
+
+	out, err := os.Create("../storage/" + Users_idstr + "/root/" + Struuid + extension)
 	if err != nil {
 		http.Error(w, "ERREUR dans la creation du fichier", http.StatusInternalServerError)
 		return
@@ -144,7 +174,7 @@ func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
 		UsersID:      Users_id,
 		FolderID:     folder_id,
 		OriginalName: fileheader.Filename,
-		StoredPath:   "storage/" + Users_idstr + "/" + Struuid + extension,
+		StoredPath:   "storage/" + Users_idstr + "/root/" + Struuid + extension,
 		MimeType:     fileheader.Header.Get("content-type"),
 		SizeBytes:    ExactSizeBytes,
 		CreatedAt:    time.Now(),
@@ -236,7 +266,7 @@ func loadfolderhandle(w http.ResponseWriter, r *http.Request) ([]Folder, error) 
 }
 
 func folderCreationhandle(w http.ResponseWriter, r *http.Request) {
-	var folder_id int
+	/*var folder_id int
 	folder_idstr := r.URL.Query().Get("folder_id")
 	Users_idstr := r.URL.Query().Get("Users_id")
 	Users_id, err := strconv.Atoi(Users_idstr)
@@ -252,27 +282,41 @@ func folderCreationhandle(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		folder_id = 0
-	}
+	} */
+	if r.Method == http.MethodPost {
+		Users_idstr := r.FormValue("Users_id")
+		Users_id, err := strconv.Atoi(Users_idstr)
+		if err != nil {
+			http.Error(w, "convertion Users_id", http.StatusInternalServerError)
+			return
+		}
+		folder_idstr := r.FormValue("folder_id")
+		folder_id, err := strconv.Atoi(folder_idstr)
+		if err != nil {
+			http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+			return
+		}
 
-	name := r.FormValue("name")
-	if name == "" {
-		http.Error(w, "ERREUR name ne peut pas etre vide", http.StatusBadRequest)
-		return
-	}
+		name := r.FormValue("name")
+		if name == "" {
+			http.Error(w, "ERREUR name ne peut pas etre vide", http.StatusBadRequest)
+			return
+		}
 
-	f := Folder{
-		Users_id:  Users_id,
-		Nom:       name,
-		Parent_id: folder_id,
-	}
+		f := Folder{
+			Users_id:  Users_id,
+			Nom:       name,
+			Parent_id: folder_id,
+		}
 
-	_, err = db.Exec(
-		"INSERT INTO folders (users_id, nom, parent_id) VALUES (?,?,?)",
-		&f.Users_id, &f.Nom, &f.Parent_id,
-	)
-	if err != nil {
-		http.Error(w, "ERREUR d'insert ", http.StatusInternalServerError)
-		return
+		_, err = db.Exec(
+			"INSERT INTO folders (users_id, nom, parent_id) VALUES (?,?,?)",
+			&f.Users_id, &f.Nom, &f.Parent_id,
+		)
+		if err != nil {
+			http.Error(w, "ERREUR d'insert ", http.StatusInternalServerError)
+			return
+		}
 	}
 }
 
@@ -280,6 +324,7 @@ func AffichageHandle(w http.ResponseWriter, r *http.Request) {
 	var folder []Folder
 	var file []File
 	var folder_id int
+	var rootId int
 	switch r.Method {
 	case http.MethodGet:
 		folder_idstr := r.URL.Query().Get("folder_id")
@@ -297,6 +342,16 @@ func AffichageHandle(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			folder_id = 0
+		}
+
+		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err != nil {
+			log.Fatal(err)
+			http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
+			return
+		}
+
+		if folder_id == 0 {
+			folder_id = rootId
 		}
 
 		rowsfolderracine, err := db.Query("SELECT * FROM folders WHERE users_id = ? AND parent_id = ?", &Users_id, &folder_id)
@@ -403,7 +458,9 @@ func main() {
 	http.HandleFunc("/login", loginhandle)
 	http.HandleFunc("/register", registerhandle)
 	http.HandleFunc("/upload", uploadfilehandle)
+	http.HandleFunc("/createfolder", folderCreationhandle)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
+
 }
