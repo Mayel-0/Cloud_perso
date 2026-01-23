@@ -47,17 +47,25 @@ type File struct {
 }
 
 type Folder struct {
-	Id         int       `db:"id"`
-	Users_id   int       `db:"users_id"`
-	Nom        string    `db:"nom"`
-	Parent_id  int       `db:"parent_id"`
-	Created_at time.Time `db:"created_at"`
+	Id         int        `db:"id"`
+	Users_id   int        `db:"users_id"`
+	Nom        string     `db:"nom"`
+	Parent_id  int        `db:"parent_id"`
+	Created_at time.Time  `db:"created_at"`
+	DeletedAt  *time.Time `db:"deleted_at"`
 }
 
 type PageData struct {
 	Folders         []Folder
 	Files           []File
 	CurrentFolderID int
+	Crumb           []Crumbs
+}
+
+type Crumbs struct {
+	Id       int    `db:"id"`
+	ParentID int    `db:"parent_id"`
+	Name     string `db:"nom"`
 }
 
 // SendEmail envoie un email générique.
@@ -111,6 +119,7 @@ func parseTemplates() (*template.Template, error) {
 		"../frontend/src/html/register.html",
 		"../frontend/src/html/verify.html",
 		"../frontend/src/html/cloud_acceuil.html",
+		"../frontend/src/html/cloud_corbeille.html",
 	)
 	if err != nil {
 		println("ERREUR func PARSETEMPLATES")
@@ -145,14 +154,30 @@ func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
 	var folder_id int
 	var rootId int
 	Struuid := NewUUIDv4()
-	folder_idstr := r.URL.Query().Get("folder_id")
+	/*folder_idstr := r.URL.Query().Get("folder_id")
 	Users_idstr := r.URL.Query().Get("Users_id")
 	Users_id, err := strconv.Atoi(Users_idstr)
 	if err != nil {
 		http.Error(w, "convertion Users_id", http.StatusInternalServerError)
 		return
+	}*/
+	c, err := r.Cookie("session_token")
+	if err != nil { /* pas connecté */
 	}
 
+	sess, ok := sessions[c.Value]
+	if !ok || time.Now().After(sess.expiry) { /* session invalide */
+	}
+
+	Users_id := sess.userid
+	Users_idstr := strconv.Itoa(Users_id)
+
+	folder_idstr := r.FormValue("folder_id")
+	folder_id, err = strconv.Atoi(folder_idstr)
+	if err != nil {
+		http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+		return
+	}
 	if folder_idstr != "" {
 		folder_id, err = strconv.Atoi(folder_idstr)
 		if err != nil {
@@ -232,50 +257,69 @@ func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec("INSERT INTO files (users_id,folder_id,original_name,stored_path,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?)",
 		&f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt)
 	if err != nil {
-		log.Fatal(err)
-		//http.Error(w, "ERROR d'insert DB", http.StatusInternalServerError)
+		http.Error(w, "ERROR d'insert DB", http.StatusInternalServerError)
 		return
 	}
+	http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
 }
 
 func downloadhandle(w http.ResponseWriter, r *http.Request) {
-	file_idstr := r.URL.Query().Get("file_id")
-	Users_idstr := r.URL.Query().Get("Users_id")
-	Users_id, err := strconv.Atoi(Users_idstr)
-	if err != nil {
-		http.Error(w, "convertion Users_id", http.StatusInternalServerError)
-		return
-	}
-	file_id, err := strconv.Atoi(file_idstr)
-	if err != nil {
-		http.Error(w, "convertion folder_id", http.StatusInternalServerError)
-		return
-	}
-	var f File
+	if r.Method == http.MethodPost {
+		file_idstr := r.FormValue("file_id")
+		file_id, err := strconv.Atoi(file_idstr)
+		if err != nil {
+			http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+			return
+		}
 
-	err = db.QueryRow("SELECT * FROM files WHERE users_id	 = ? AND id = ? ", &Users_id, &file_id).Scan(&f.ID, &f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt, &f.DeletedAt)
-	if err != nil {
-		http.Error(w, "ERREUR 404 de select", http.StatusNotFound)
-		return
-	}
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
 
-	storedFile, err := os.Open("../" + f.StoredPath)
-	if err != nil {
-		http.Error(w, "ERREUR dans l'ouverture du fichier", http.StatusInternalServerError)
-		return
-	}
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
 
-	defer storedFile.Close()
+		Users_id := sess.userid
+		var f File
 
-	w.Header().Set("Content-Type", f.MimeType)
-	SizeBytesstr := strconv.FormatInt(f.SizeBytes, 10)
-	w.Header().Set("Content-Length", SizeBytesstr)
-	disposition := "attachment; filename=\"" + f.OriginalName + "\""
-	w.Header().Set("Content-Disposition", disposition)
+		err = db.QueryRow("SELECT * FROM files WHERE users_id	 = ? AND id = ? AND deleted_at IS NULL", &Users_id, &file_id).Scan(&f.ID, &f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt, &f.DeletedAt)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(w, "Fichier introuvable ou supprimé", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "ERREUR 500 de select", http.StatusInternalServerError)
+			return
+		}
 
-	_, err = io.Copy(w, storedFile)
-	if err != nil {
-		http.Error(w, "ERREUR dans la copie des data", http.StatusInternalServerError)
+		storedFile, err := os.Open("../" + f.StoredPath)
+		if err != nil {
+			http.Error(w, "ERREUR dans l'ouverture du fichier", http.StatusInternalServerError)
+			return
+		}
+
+		defer storedFile.Close()
+
+		w.Header().Set("Content-Type", f.MimeType)
+		SizeBytesstr := strconv.FormatInt(f.SizeBytes, 10)
+		w.Header().Set("Content-Length", SizeBytesstr)
+		disposition := "attachment; filename=\"" + f.OriginalName + "\""
+		w.Header().Set("Content-Disposition", disposition)
+
+		_, err = io.Copy(w, storedFile)
+		if err != nil {
+			http.Error(w, "ERREUR dans la copie des data", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
+	} else {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
 }
@@ -315,14 +359,15 @@ func loadfolderhandle(w http.ResponseWriter, r *http.Request) ([]Folder, error) 
 }
 
 func folderCreationhandle(w http.ResponseWriter, r *http.Request) {
-	/*var folder_id int
-	folder_idstr := r.URL.Query().Get("folder_id")
+	var folder_id int
+	/*folder_idstr := r.URL.Query().Get("folder_id")
 	Users_idstr := r.URL.Query().Get("Users_id")
 	Users_id, err := strconv.Atoi(Users_idstr)
 	if err != nil {
 		http.Error(w, "convertion Users_id", http.StatusInternalServerError)
 		return
 	}
+
 	if folder_idstr != "" {
 		folder_id, err = strconv.Atoi(folder_idstr)
 		if err != nil {
@@ -332,15 +377,25 @@ func folderCreationhandle(w http.ResponseWriter, r *http.Request) {
 	} else {
 		folder_id = 0
 	} */
+
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		http.Error(w, "Non authentifié", http.StatusUnauthorized)
+		return
+	}
+
+	sess, ok := sessions[c.Value]
+	if !ok || time.Now().After(sess.expiry) {
+		http.Error(w, "Session expirée", http.StatusUnauthorized)
+		return
+	}
+
+	Users_id := sess.userid
+	//Users_idstr := strconv.Itoa(Users_id)
+
 	if r.Method == http.MethodPost {
-		Users_idstr := r.FormValue("Users_id")
-		Users_id, err := strconv.Atoi(Users_idstr)
-		if err != nil {
-			http.Error(w, "convertion Users_id", http.StatusInternalServerError)
-			return
-		}
 		folder_idstr := r.FormValue("folder_id")
-		folder_id, err := strconv.Atoi(folder_idstr)
+		folder_id, err = strconv.Atoi(folder_idstr)
 		if err != nil {
 			http.Error(w, "convertion folder_id", http.StatusInternalServerError)
 			return
@@ -363,20 +418,30 @@ func folderCreationhandle(w http.ResponseWriter, r *http.Request) {
 			&f.Users_id, &f.Nom, &f.Parent_id,
 		)
 		if err != nil {
+			log.Fatal(err)
 			http.Error(w, "ERREUR d'insert ", http.StatusInternalServerError)
 			return
 		}
+		http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
 	}
 }
 
-func deleteFileHandle(w http.ResponseWriter, r *http.Request) {
+func softdeleteFileHandle(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		Users_idstr := r.URL.Query().Get("Users_id")
-		Users_id, err := strconv.Atoi(Users_idstr)
+		c, err := r.Cookie("session_token")
 		if err != nil {
-			http.Error(w, "convertion Users_id", http.StatusInternalServerError)
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
 			return
 		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
 		file_idstr := r.FormValue("file_id")
 		file_id, err := strconv.Atoi(file_idstr)
 		if err != nil {
@@ -389,7 +454,44 @@ func deleteFileHandle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "ERREUR de Update", http.StatusInternalServerError)
 			return
 		}
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+
+		http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
+	}
+	if r.Method == http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func softdeletefolderhandle(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
+		folder_idstr := r.FormValue("folder_id")
+		folder_id, err := strconv.Atoi(folder_idstr)
+		if err != nil {
+			http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+			return
+		}
+		_, err = db.Exec("UPDATE folders SET deleted_at = NOW() WHERE id = ? AND users_id = ?", &folder_id, &Users_id)
+		if err != nil {
+			http.Error(w, "ERREUR dupdate", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
 	}
 	if r.Method == http.MethodGet {
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
@@ -404,13 +506,29 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 	var rootId int
 	switch r.Method {
 	case http.MethodGet:
-		folder_idstr := r.URL.Query().Get("folder_id")
-		Users_idstr := r.URL.Query().Get("Users_id")
+		/*Users_idstr := r.URL.Query().Get("Users_id")
 		Users_id, err := strconv.Atoi(Users_idstr)
-		if err != nil {
+				if err != nil {
 			http.Error(w, "convertion Users_id", http.StatusInternalServerError)
 			return
+		}*/
+
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
 		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+		Users_idstr := strconv.Itoa(Users_id)
+
+		folder_idstr := r.FormValue("folder_id")
 		if folder_idstr != "" {
 			folder_id, err = strconv.Atoi(folder_idstr)
 			if err != nil {
@@ -421,7 +539,7 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 			folder_id = 0
 		}
 
-		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err == sql.ErrNoRows {
+		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root' AND deleted_at IS NULL", &Users_id).Scan(&rootId); err == sql.ErrNoRows {
 			root := "../storage/" + Users_idstr + "/" + "root"
 			if err = os.MkdirAll(root, 0755); err != nil {
 				http.Error(w, "ERREUR d'insert root", http.StatusInternalServerError)
@@ -429,17 +547,17 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 			}
 			_, err = db.Exec("INSERT INTO folders (users_id, nom, parent_id) VALUES (?, 'root', NULL)", &Users_id)
 			if err != nil {
-				log.Fatal(err)
 				http.Error(w, "ERREUR d'insert root", http.StatusInternalServerError)
 				return
 			}
 		} else if err != nil {
+			log.Println("Pas de root trouvé, creation...")
 			http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
 			return
 		}
 
-		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err != nil {
-			log.Fatal(err)
+		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root' AND deleted_at IS NULL", &Users_id).Scan(&rootId); err != nil {
+			log.Println("Erreur QueryRow root:", err)
 			http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
 			return
 		}
@@ -448,16 +566,16 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 			folder_id = rootId
 		}
 
-		rowsfolderracine, err := db.Query("SELECT * FROM folders WHERE users_id = ? AND parent_id = ?", &Users_id, &folder_id)
+		rowsfolder, err := db.Query("SELECT * FROM folders WHERE users_id = ? AND parent_id = ?  AND deleted_at IS NULL", &Users_id, &folder_id)
 		if err != nil {
 			http.Error(w, "ERREUR Select", http.StatusInternalServerError)
 			return
 		}
-		defer rowsfolderracine.Close()
+		defer rowsfolder.Close()
 
-		for rowsfolderracine.Next() {
+		for rowsfolder.Next() {
 			var f Folder
-			if err = rowsfolderracine.Scan(&f.Id, &f.Users_id, &f.Nom, &f.Parent_id, &f.Created_at); err != nil {
+			if err = rowsfolder.Scan(&f.Id, &f.Users_id, &f.Nom, &f.Parent_id, &f.Created_at, &f.DeletedAt); err != nil {
 				http.Error(w, "ERREUR scan", http.StatusInternalServerError)
 				return
 			}
@@ -481,12 +599,110 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 			file = append(file, f)
 		}
 
+		listCrumb, err := rootbreadcrumb(folder_id, w, r)
+		if err != nil {
+			http.Error(w, "Erreur listcrumb", http.StatusInternalServerError)
+			return
+		}
 		data := PageData{
 			Folders:         folder,
 			Files:           file,
 			CurrentFolderID: folder_id,
+			Crumb:           listCrumb,
 		}
 		if err = tpl.ExecuteTemplate(w, "cloud_acceuil.html", data); err != nil {
+			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
+			return
+		}
+	default:
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func CloudCorbeilleHandle(w http.ResponseWriter, r *http.Request) {
+	var folder []Folder
+	var file []File
+	//var folder_id int
+	//var rootId int
+	switch r.Method {
+	case http.MethodGet:
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
+		/*folder_idstr := r.FormValue("folder_id")
+		if folder_idstr != "" {
+			folder_id, err = strconv.Atoi(folder_idstr)
+			if err != nil {
+				http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			folder_id = 0
+		}
+
+		if folder_id == 0 {
+			folder_id = rootId
+		}*/
+
+		rowsfolder, err := db.Query("SELECT * FROM folders WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
+		if err != nil {
+			http.Error(w, "ERREUR de select folder", http.StatusInternalServerError)
+			return
+		}
+
+		defer rowsfolder.Close()
+
+		for rowsfolder.Next() {
+			var f Folder
+			if err = rowsfolder.Scan(&f.Id, &f.Users_id, &f.Nom, &f.Parent_id, &f.Created_at, &f.DeletedAt); err != nil {
+				http.Error(w, "erreur scan", http.StatusInternalServerError)
+				return
+			}
+			folder = append(folder, f)
+		}
+
+		rowsfilde, err := db.Query("SELECT * FROM files WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
+		if err != nil {
+			http.Error(w, "ERREUR de select files", http.StatusInternalServerError)
+			return
+		}
+
+		defer rowsfilde.Close()
+
+		for rowsfilde.Next() {
+			var f File
+			if err = rowsfilde.Scan(&f.ID, &f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt, &f.DeletedAt); err != nil {
+				http.Error(w, "erreur scan", http.StatusInternalServerError)
+				return
+			}
+			file = append(file, f)
+		}
+
+		//listCrumb, err := rootbreadcrumb(folder_id, w, r)
+		if err != nil {
+			http.Error(w, "Erreur listcrumb", http.StatusInternalServerError)
+			return
+		}
+		data := PageData{
+			Folders: folder,
+			Files:   file,
+			//CurrentFolderID: folder_id,
+			//Crumb:           listCrumb,
+		}
+
+		if err = tpl.ExecuteTemplate(w, "cloud_corbeille.html", data); err != nil {
 			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
 			return
 		}
@@ -507,6 +723,44 @@ func generateCode() (string, error) {
 	}
 
 	return string(codes), nil
+}
+
+func rootbreadcrumb(idstart int, w http.ResponseWriter, r *http.Request) ([]Crumbs, error) {
+	var crumbs []Crumbs
+	var C Crumbs
+	var parent sql.NullInt64
+
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		http.Error(w, "Non authentifié", http.StatusUnauthorized)
+		return nil, err
+	}
+
+	sess, ok := sessions[c.Value]
+	if !ok || time.Now().After(sess.expiry) {
+		http.Error(w, "Session expirée", http.StatusUnauthorized)
+		return nil, err
+	}
+
+	Users_id := sess.userid
+
+	for {
+		if err = db.QueryRow("SELECT id, parent_id, nom FROM folders WHERE id = ? AND users_id = ? AND deleted_at IS NULL", &idstart, &Users_id).Scan(&C.Id, &parent, &C.Name); err != nil {
+			http.Error(w, "ERREUR de crumbs", http.StatusInternalServerError)
+			return nil, err
+		}
+		crumbs = append(crumbs, C)
+		if !parent.Valid {
+			C.ParentID = 0
+			break
+		}
+		C.ParentID = int(parent.Int64)
+		idstart = C.ParentID
+	}
+	for i, j := 0, len(crumbs)-1; i < j; i, j = i+1, j-1 {
+		crumbs[i], crumbs[j] = crumbs[j], crumbs[i]
+	}
+	return crumbs, nil
 }
 
 // handlefunc
@@ -633,7 +887,7 @@ func verifyhandle(w http.ResponseWriter, r *http.Request) {
 			Value:   sessionToken,
 			Expires: expiresAt,
 		})
-		http.Redirect(w, r, "/cloud/acceuil/?Users_id="+User_id, http.StatusSeeOther)
+		http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
 		return
 	}
 }
@@ -740,10 +994,13 @@ func main() {
 	http.HandleFunc("/register", registerhandle)
 	http.HandleFunc("/verify", verifyhandle)
 	http.HandleFunc("/cloud/acceuil/", CloudAcceuilHandle)
+	http.HandleFunc("/cloud/corbeille/", CloudCorbeilleHandle)
 	http.HandleFunc("/logout", Logouthandle)
 	http.HandleFunc("/upload", uploadfilehandle)
 	http.HandleFunc("/createfolder", folderCreationhandle)
-	http.HandleFunc("/deletefile", deleteFileHandle)
+	http.HandleFunc("/deletefile", softdeleteFileHandle)
+	http.HandleFunc("/deletefolder", softdeletefolderhandle)
+	http.HandleFunc("/downloadfile", downloadhandle)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
