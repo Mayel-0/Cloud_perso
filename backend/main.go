@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"text/template"
 	"time"
 
@@ -60,6 +61,9 @@ type PageData struct {
 	Files           []File
 	CurrentFolderID int
 	Crumb           []Crumbs
+	ErrorMsg        string
+	ErrorFileID     int
+	ErrorFolderID   int
 }
 
 type Crumbs struct {
@@ -464,39 +468,138 @@ func softdeleteFileHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func softdeletefolderhandle(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		c, err := r.Cookie("session_token")
-		if err != nil {
-			http.Error(w, "Non authentifié", http.StatusUnauthorized)
-			return
-		}
-
-		sess, ok := sessions[c.Value]
-		if !ok || time.Now().After(sess.expiry) {
-			http.Error(w, "Session expirée", http.StatusUnauthorized)
-			return
-		}
-
-		Users_id := sess.userid
-
-		folder_idstr := r.FormValue("folder_id")
-		folder_id, err := strconv.Atoi(folder_idstr)
-		if err != nil {
-			http.Error(w, "convertion folder_id", http.StatusInternalServerError)
-			return
-		}
-		_, err = db.Exec("UPDATE folders SET deleted_at = NOW() WHERE id = ? AND users_id = ?", &folder_id, &Users_id)
-		if err != nil {
-			http.Error(w, "ERREUR dupdate", http.StatusInternalServerError)
-			return
-		}
-
-		http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
-	}
-	if r.Method == http.MethodGet {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
+
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		http.Error(w, "Non authentifié", http.StatusUnauthorized)
+		return
+	}
+
+	sess, ok := sessions[c.Value]
+	if !ok || time.Now().After(sess.expiry) {
+		http.Error(w, "Session expirée", http.StatusUnauthorized)
+		return
+	}
+	userID := sess.userid
+
+	folderIDStr := r.FormValue("folder_id")
+	folderID, err := strconv.Atoi(folderIDStr)
+	if err != nil {
+		http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+		return
+	}
+
+	// 1) récupérer tous les folder_id du sous-arbre
+	folderIDs, err := collectFolderTreeIDs(userID, folderID)
+	if err != nil {
+		http.Error(w, "ERREUR collecte folders", http.StatusInternalServerError)
+		return
+	}
+
+	// 2) soft delete les fichiers de tous ces dossiers
+	if err := softDeleteFilesByFolderIDs(userID, folderIDs); err != nil {
+		http.Error(w, "ERREUR soft delete files", http.StatusInternalServerError)
+		return
+	}
+
+	// 3) soft delete tous les dossiers du sous-arbre
+	if err := softDeleteFoldersByIDs(userID, folderIDs); err != nil {
+		http.Error(w, "ERREUR soft delete folders", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
+}
+
+// Met deleted_at = NOW() sur folders.id IN (ids...) pour un user donné.
+func softDeleteFoldersByIDs(userID int, ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// construire "?,?,?,..."
+	placeholders := make([]string, len(ids))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	// args : d’abord userID, puis tous les ids
+	args := make([]interface{}, 0, len(ids)+1)
+	args = append(args, userID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+
+	query := "UPDATE folders SET deleted_at = NOW() WHERE users_id = ? AND id IN (" + inClause + ")"
+
+	_, err := db.Exec(query, args...)
+	return err
+}
+
+// Met deleted_at = NOW() sur files.folder_id IN (ids...) pour un user donné.
+func softDeleteFilesByFolderIDs(userID int, folderIDs []int) error {
+	if len(folderIDs) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(folderIDs))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	args := make([]interface{}, 0, len(folderIDs)+1)
+	args = append(args, userID)
+	for _, id := range folderIDs {
+		args = append(args, id)
+	}
+
+	query := "UPDATE files SET deleted_at = NOW() WHERE users_id = ? AND folder_id IN (" + inClause + ")"
+
+	_, err := db.Exec(query, args...)
+	return err
+}
+
+// Retourne tous les dossiers à soft delete : le dossier de départ + tous ses enfants.
+func collectFolderTreeIDs(userID, startFolderID int) ([]int, error) {
+	// liste finale de tous les dossiers à supprimer
+	var all []int
+
+	// "queue" de dossiers à explorer (BFS)
+	queue := []int{startFolderID}
+
+	for len(queue) > 0 {
+		// prendre le premier élément
+		current := queue[0]
+		queue = queue[1:] // enlever le premier
+
+		all = append(all, current)
+
+		// récupérer les enfants directs de current
+		rows, err := db.Query(
+			"SELECT id FROM folders WHERE users_id = ? AND parent_id = ? AND deleted_at IS NULL",
+			userID, current,
+		)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var childID int
+			if err := rows.Scan(&childID); err != nil {
+				return nil, err
+			}
+			queue = append(queue, childID)
+		}
+	}
+
+	return all, nil
 }
 
 func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
@@ -604,12 +707,31 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Erreur listcrumb", http.StatusInternalServerError)
 			return
 		}
+
+		errorMsg := r.URL.Query().Get("error")
+		errorFileID := 0
+		if errorFileIDStr := r.URL.Query().Get("error_file_id"); errorFileIDStr != "" {
+			if v, err := strconv.Atoi(errorFileIDStr); err == nil {
+				errorFileID = v
+			}
+		}
+		errorFolderID := 0
+		if errorFolderIDStr := r.URL.Query().Get("error_folder_id"); errorFolderIDStr != "" {
+			if v, err := strconv.Atoi(errorFolderIDStr); err == nil {
+				errorFolderID = v
+			}
+		}
+
 		data := PageData{
 			Folders:         folder,
 			Files:           file,
 			CurrentFolderID: folder_id,
 			Crumb:           listCrumb,
+			ErrorMsg:        errorMsg,
+			ErrorFileID:     errorFileID,
+			ErrorFolderID:   errorFolderID,
 		}
+
 		if err = tpl.ExecuteTemplate(w, "cloud_acceuil.html", data); err != nil {
 			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
 			return
@@ -726,6 +848,7 @@ func generateCode() (string, error) {
 }
 
 func rootbreadcrumb(idstart int, w http.ResponseWriter, r *http.Request) ([]Crumbs, error) {
+
 	var crumbs []Crumbs
 	var C Crumbs
 	var parent sql.NullInt64
@@ -761,6 +884,122 @@ func rootbreadcrumb(idstart int, w http.ResponseWriter, r *http.Request) ([]Crum
 		crumbs[i], crumbs[j] = crumbs[j], crumbs[i]
 	}
 	return crumbs, nil
+}
+
+func renamedossier(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var folder_id int
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
+		folder_idstr := r.FormValue("folder_id")
+		if folder_idstr != "" {
+			folder_id, err = strconv.Atoi(folder_idstr)
+			if err != nil {
+				http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			folder_id = 0
+		}
+
+		newname := r.FormValue("newname")
+		currentfolder_id := r.FormValue("currentfolderid")
+		if len(newname) > 50 {
+			http.Redirect(w, r, "/cloud/acceuil/?folder_id="+currentfolder_id+"&error=Nom de fichier trop long (max 50 caractères).&error_folder_id="+folder_idstr,
+				http.StatusSeeOther)
+			return
+		}
+
+		_, err = db.Exec("UPDATE folders SET nom = ? WHERE users_id = ? AND id = ? AND deleted_at IS NULL", &newname, &Users_id, &folder_id)
+		if err != nil {
+			http.Error(w, "ERREUR de update", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/cloud/acceuil/?folder_id="+currentfolder_id, http.StatusSeeOther)
+	} else {
+		http.Error(w, "Methode non autoriser", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func renameKeepAllExt(oldName, newBase string) string {
+	dot := strings.Index(oldName, ".")
+	if dot == -1 {
+		// pas d'extension
+		return newBase
+	}
+	ext := oldName[dot:] // tout à partir du premier point: ".tar.gz", ".png", etc.
+	return newBase + ext
+}
+
+func renamefile(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var oldName string
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
+		file_idstr := r.FormValue("file_id")
+		file_id, err := strconv.Atoi(file_idstr)
+		if err != nil {
+			http.Error(w, "convertion files_id", http.StatusInternalServerError)
+			return
+		}
+
+		currentfolder_id := r.FormValue("currentfolderid")
+
+		newname := r.FormValue("newname")
+		if strings.Contains(newname, ".") {
+			http.Redirect(w, r, "/cloud/acceuil/?folder_id="+currentfolder_id+"&error=Le Nom du fichier ne doit pas contenire de (.).&error_file_id="+file_idstr,
+				http.StatusSeeOther)
+			return
+		}
+		if len(newname) > 50 {
+			http.Redirect(w, r, "/cloud/acceuil/?folder_id="+currentfolder_id+"&error=Nom de fichier trop long (max 50 caractères).&error_file_id="+file_idstr,
+				http.StatusSeeOther)
+			return
+		}
+
+		if err = db.QueryRow("SELECT original_name FROM files WHERE id = ? AND users_id = ? AND deleted_at IS NULL", &file_id, &Users_id).Scan(&oldName); err != nil {
+			http.Error(w, "ERREUR de select original_name", http.StatusInternalServerError)
+			return
+		}
+
+		finalName := renameKeepAllExt(oldName, newname)
+
+		_, err = db.Exec("UPDATE files SET original_name = ? WHERE id = ? AND users_id = ? AND deleted_at IS NULL", &finalName, &file_id, &Users_id)
+		if err != nil {
+			http.Error(w, "ERREUR d'update", http.StatusInternalServerError)
+			return
+		}
+		http.Redirect(w, r, "/cloud/acceuil/?folder_id="+currentfolder_id, http.StatusSeeOther)
+	} else {
+		http.Error(w, "Methode non autoriser", http.StatusMethodNotAllowed)
+		return
+	}
 }
 
 // handlefunc
@@ -1001,6 +1240,8 @@ func main() {
 	http.HandleFunc("/deletefile", softdeleteFileHandle)
 	http.HandleFunc("/deletefolder", softdeletefolderhandle)
 	http.HandleFunc("/downloadfile", downloadhandle)
+	http.HandleFunc("/renamefolder", renamedossier)
+	http.HandleFunc("/renamefile", renamefile)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
