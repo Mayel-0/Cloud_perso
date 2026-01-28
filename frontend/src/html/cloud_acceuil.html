@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>acceuil || login ou register</title>
+</head>
+<body>
+  <h1>Bienvenue sur le Cloud</h1>
+
+  <label for="avatar">Choose a profile picture:</label>
+
+  <form action="/upload" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" />
+    <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
+    <input type="submit" value="Upload this file" />
+  </form>
+
+  <form action="/createfolder" method="post">
+    <label>Nom du dossier</label>
+    <input type="text" id="name" name="name">
+    <input type="submit" value="Upload this file" />
+    <input type="hidden" name="Users_id" value="{{.}}">
+    <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
+  </form>
+
+  <h2>route</h2>
+  {{range .Crumb}}
+    <a href="/cloud/acceuil/?folder_id={{.Id}}">{{.Name}}</a>
+    <label>/</label>
+  {{end}}
+
+  {{range .Files}}
+    <h1>{{.OriginalName}}</h1>
+    <form action="/deletefile" method="post">
+      <input type="hidden" name="file_id" value="{{.ID}}">
+      <input type="hidden" name="Users_id" value="{{.}}">
+      <button type="submit">Supprimer</button>
+    </form>
+    <form action="/downloadfile" method="post">
+      <input type="hidden" name="file_id" value="{{.ID}}"/>
+      <button type="submit">downloadfile</button>
+    </form>
+    <form action="/renamefile" method="post">
+      <input type="hidden" name="file_id" value="{{.ID}}">
+      <input type="text" name="newname" id="newname" placeholder="{{.OriginalName}}">
+      <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
+    </form>
+    {{if and $.ErrorMsg (eq $.ErrorFileID .ID)}}
+      <p>{{$.ErrorMsg}}</p>
+    {{end}}
+  {{end}}
+
+  {{range .Folders}}
+    <h1>{{.Nom}}</h1>
+    <form action="/deletefolder" method="post">
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+      <button type="submit">Supprimer</button>
+    </form>
+    <form action="/cloud/acceuil/" method="get">
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+      <button type="submit">Ouvrir</button>
+    </form>
+
+    <form action="/renamefolder" method="post">
+      <input type="text" name="newname" id="newname" placeholder="{{.Nom}}">
+      <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+    </form>
+    {{if and $.ErrorMsg (eq $.ErrorFolderID .Id)}}
+      <p>{{$.ErrorMsg}}</p>
+    {{end}}
+  {{end}}
+
+
+  <a href="/cloud/corbeille/">
+    <button>corbeille</button>
+  </a>
+</body>
+</html>

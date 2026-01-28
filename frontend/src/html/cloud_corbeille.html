@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Corbeille</title>
+</head>
+<body>
+  <h1>Bienvenue sur le Cloud || Corbeille</h1>
+
+  <h2>route</h2>
+  {{range .Crumb}}
+    <a href="/cloud/corbeille/?folder_id={{.Id}}">{{.Name}}</a>
+    <label>/</label>
+  {{end}}
+
+  {{range .Files}}
+    <h1>{{.OriginalName}}</h1>
+    <form action="/harddeletefile" method="post">
+      <input type="hidden" name="file_id" value="{{.ID}}">
+      <button type="submit"> supprimer </button>
+    </form>
+    <form action="/restorfile" method="post">
+      <button type="submit"> restore </button>
+      <input type="hidden" name="file_id" value="{{.ID}}">
+    </form>
+
+  {{end}}
+
+  {{range .Folders}}
+    <h1>{{.Nom}}</h1>
+    <form action="/harddeleteFolder" method="post">
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+      <button type="submit"> supprimer </button>
+    </form>
+        <form action="/restorfolder" method="post">
+      <button type="submit"> restore </button>
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+    </form>
+  {{end}}
+
+  <a href="/harddeleteall">
+    <button>delete ALL</button>
+  </a>
+</body>
+</html>
