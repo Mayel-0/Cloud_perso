@@ -124,6 +124,7 @@ func parseTemplates() (*template.Template, error) {
 		"../frontend/src/html/verify.html",
 		"../frontend/src/html/cloud_acceuil.html",
 		"../frontend/src/html/cloud_corbeille.html",
+		"../frontend/src/html/harddeleteall.html",
 	)
 	if err != nil {
 		println("ERREUR func PARSETEMPLATES")
@@ -541,6 +542,31 @@ func softDeleteFoldersByIDs(userID int, ids []int) error {
 	return err
 }
 
+func restoreFoldersByIDs(userID int, ids []int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// construire "?,?,?,..."
+	placeholders := make([]string, len(ids))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	// args : d’abord userID, puis tous les ids
+	args := make([]interface{}, 0, len(ids)+1)
+	args = append(args, userID)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+
+	query := "UPDATE folders SET deleted_at = NULL WHERE users_id = ? AND id IN (" + inClause + ")"
+
+	_, err := db.Exec(query, args...)
+	return err
+}
+
 // Met deleted_at = NOW() sur files.folder_id IN (ids...) pour un user donné.
 func softDeleteFilesByFolderIDs(userID int, folderIDs []int) error {
 	if len(folderIDs) == 0 {
@@ -560,6 +586,29 @@ func softDeleteFilesByFolderIDs(userID int, folderIDs []int) error {
 	}
 
 	query := "UPDATE files SET deleted_at = NOW() WHERE users_id = ? AND folder_id IN (" + inClause + ")"
+
+	_, err := db.Exec(query, args...)
+	return err
+}
+
+func restoreFilesByFolderIDs(userID int, folderIDs []int) error {
+	if len(folderIDs) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(folderIDs))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	args := make([]interface{}, 0, len(folderIDs)+1)
+	args = append(args, userID)
+	for _, id := range folderIDs {
+		args = append(args, id)
+	}
+
+	query := "UPDATE files SET deleted_at = NULL WHERE users_id = ? AND folder_id IN (" + inClause + ")"
 
 	_, err := db.Exec(query, args...)
 	return err
@@ -745,6 +794,8 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 func CloudCorbeilleHandle(w http.ResponseWriter, r *http.Request) {
 	var folder []Folder
 	var file []File
+	var folder_id int
+	var rootId int
 	//var folder_id int
 	//var rootId int
 	switch r.Method {
@@ -763,7 +814,7 @@ func CloudCorbeilleHandle(w http.ResponseWriter, r *http.Request) {
 
 		Users_id := sess.userid
 
-		/*folder_idstr := r.FormValue("folder_id")
+		folder_idstr := r.FormValue("folder_id")
 		if folder_idstr != "" {
 			folder_id, err = strconv.Atoi(folder_idstr)
 			if err != nil {
@@ -776,7 +827,7 @@ func CloudCorbeilleHandle(w http.ResponseWriter, r *http.Request) {
 
 		if folder_id == 0 {
 			folder_id = rootId
-		}*/
+		}
 
 		rowsfolder, err := db.Query("SELECT * FROM folders WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
 		if err != nil {
@@ -1002,6 +1053,269 @@ func renamefile(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func HardDeleteAll(w http.ResponseWriter, r *http.Request) {
+	var passwordDB string
+	switch r.Method {
+	case http.MethodGet:
+		if err = tpl.ExecuteTemplate(w, "harddeleteall.html", nil); err != nil {
+			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
+			return
+		}
+	case http.MethodPost:
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
+		password := r.FormValue("password")
+
+		if err := db.QueryRow("SELECT password_hash FROM users WHERE id = ?", &Users_id).Scan(&passwordDB); err != nil {
+			fmt.Println("erreur de select db", err)
+			return
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(passwordDB), []byte(password)); err != nil {
+			http.Error(w, "Mots de passe incorrect", http.StatusUnauthorized)
+			return
+		}
+
+		_, err = db.Exec("DELETE FROM folders WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
+		if err != nil {
+			http.Error(w, "ERREUR supresion des folders", http.StatusInternalServerError)
+			return
+		}
+		_, err = db.Exec("DELETE FROM files WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
+		if err != nil {
+			http.Error(w, "ERREUR supresion des files", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/cloud/corbeille/", http.StatusSeeOther)
+	default:
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func harddeleteFolder(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
+		folder_idstr := r.FormValue("folder_id")
+		folder_id, err := strconv.Atoi(folder_idstr)
+		if err != nil {
+			http.Error(w, "ERRERU convertion atoi", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = db.Exec("DELETE FROM folders WHERE users_id = ? AND id = ? AND deleted_at IS NOT NULL", &Users_id, &folder_id)
+		if err != nil {
+			http.Error(w, "ERREUR supresion des folders", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/cloud/corbeille/", http.StatusSeeOther)
+	} else {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func harddeleteFile(w http.ResponseWriter, r *http.Request) {
+	var f File
+	if r.Method == http.MethodPost {
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
+		file_idstr := r.FormValue("file_id")
+		file_id, err := strconv.Atoi(file_idstr)
+		if err != nil {
+			http.Error(w, "ERREUR convertion atoi", http.StatusInternalServerError)
+			return
+		}
+
+		if err = db.QueryRow("SELECT stored_path FROM files WHERE users_id = ? AND id = ? AND deleted_at IS NOT NULL", &Users_id, &file_id).Scan(&f.StoredPath); err != nil {
+			http.Error(w, "ERREUR de select f.StoredPath", http.StatusInternalServerError)
+			return
+		}
+
+		if err = os.Remove("../" + f.StoredPath); err != nil {
+			http.Error(w, "ERREUR de delete du file dans le stoarge/", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = db.Exec("DELETE FROM files WHERE users_id = ? AND id = ? AND deleted_at IS NOT NULL", &Users_id, &file_id)
+		if err != nil {
+			http.Error(w, "ERREUR supresion des folders", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/cloud/corbeille/", http.StatusSeeOther)
+	} else {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func restoreFolderChain(userID int, folderID int) {
+	var parent sql.NullInt64
+	var deletedAt sql.NullTime
+
+	currentfolder_id := folderID
+	for {
+		err = db.QueryRow(
+			"SELECT parent_id, deleted_at FROM folders WHERE users_id = ? AND id = ?",
+			userID, currentfolder_id,
+		).Scan(&parent, &deletedAt)
+		if err != nil {
+			fmt.Println("ERREUR select:", err)
+			return
+		}
+
+		if deletedAt.Valid {
+			_, err = db.Exec(
+				"UPDATE folders SET deleted_at = NULL WHERE users_id = ? AND id = ?",
+				userID, currentfolder_id,
+			)
+			if err != nil {
+				fmt.Println("ERREUR update:", err)
+				return
+			}
+		}
+
+		if !parent.Valid {
+			break
+		}
+		currentfolder_id = int(parent.Int64)
+	}
+}
+
+func restorfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		c, err := r.Cookie("session_token")
+		if err != nil {
+			http.Error(w, "Non authentifié", http.StatusUnauthorized)
+			return
+		}
+
+		sess, ok := sessions[c.Value]
+		if !ok || time.Now().After(sess.expiry) {
+			http.Error(w, "Session expirée", http.StatusUnauthorized)
+			return
+		}
+
+		Users_id := sess.userid
+
+		file_idstr := r.FormValue("file_id")
+		file_id, err := strconv.Atoi(file_idstr)
+
+		var folderID int
+		err = db.QueryRow(
+			"SELECT folder_id FROM files WHERE users_id = ? AND id = ? AND deleted_at IS NOT NULL",
+			Users_id, file_id,
+		).Scan(&folderID)
+
+		restoreFolderChain(Users_id, folderID)
+
+		_, err = db.Exec(
+			"UPDATE files SET deleted_at = NULL WHERE users_id = ? AND id = ? AND deleted_at IS NOT NULL",
+			Users_id, file_id,
+		)
+
+		http.Redirect(w, r, "/cloud/corbeille/", http.StatusSeeOther)
+	} else {
+		http.Error(w, "Méthode non autoriser", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
+func restorfolder(w http.ResponseWriter, r *http.Request) {
+	var folder_id int
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		http.Error(w, "Non authentifié", http.StatusUnauthorized)
+		return
+	}
+
+	sess, ok := sessions[c.Value]
+	if !ok || time.Now().After(sess.expiry) {
+		http.Error(w, "Session expirée", http.StatusUnauthorized)
+		return
+	}
+
+	Users_id := sess.userid
+
+	folder_idstr := r.FormValue("folder_id")
+	if folder_idstr != "" {
+		folder_id, err = strconv.Atoi(folder_idstr)
+		if err != nil {
+			http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		folder_id = 0
+	}
+
+	restoreFolderChain(Users_id, folder_id)
+
+	// 1) récupérer tous les folder_id du sous-arbre
+	folderIDs, err := collectFolderTreeIDs(Users_id, folder_id)
+	if err != nil {
+		http.Error(w, "ERREUR collecte folders", http.StatusInternalServerError)
+		return
+	}
+
+	if err := restoreFilesByFolderIDs(Users_id, folderIDs); err != nil {
+		http.Error(w, "ERREUR soft delete files", http.StatusInternalServerError)
+		return
+	}
+
+	if err := softDeleteFoldersByIDs(Users_id, folderIDs); err != nil {
+		http.Error(w, "ERREUR soft delete folders", http.StatusInternalServerError)
+		return
+	}
+
+	_, err = db.Exec("UPDATE folders SET deleted_at = NULL WHERE users_id = ? AND id = ? AND deleted_at IS NOT NULL", &Users_id, &folder_id)
+	if err != nil {
+		http.Error(w, "ERREUR de update", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/cloud/corbeille/", http.StatusSeeOther)
+}
+
 // handlefunc
 
 func loginhandle(w http.ResponseWriter, r *http.Request) {
@@ -1048,11 +1362,12 @@ func loginhandle(w http.ResponseWriter, r *http.Request) {
 
 		expiresAt := time.Now().Add(5 * time.Minute)
 
-		err = SendVerificationEmail(email, Code)
+		println("voici le code : ", Code)
+		/*err = SendVerificationEmail(email, Code)
 		if err != nil {
 			fmt.Println("erreur dans l'envoie du mail")
 			return
-		}
+		}*/
 
 		_, err = db.Exec("INSERT INTO email_verification(users_id, verify_token, verify_expires_at, is_verified) VALUES (?,?,?,0)", User_id, Code, expiresAt)
 		if err != nil {
@@ -1242,6 +1557,11 @@ func main() {
 	http.HandleFunc("/downloadfile", downloadhandle)
 	http.HandleFunc("/renamefolder", renamedossier)
 	http.HandleFunc("/renamefile", renamefile)
+	http.HandleFunc("/harddeleteall", HardDeleteAll)
+	http.HandleFunc("/harddeletefile", harddeleteFile)
+	http.HandleFunc("/harddeleteFolder", harddeleteFolder)
+	http.HandleFunc("/restorfile", restorfile)
+	http.HandleFunc("/restorfolder", restorfolder)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
