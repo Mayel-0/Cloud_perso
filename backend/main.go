@@ -665,19 +665,10 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}*/
 
-		c, err := r.Cookie("session_token")
-		if err != nil {
-			http.Error(w, "Non authentifié", http.StatusUnauthorized)
-			return
+		Users_id, ok := requireSession(w, r)
+		if !ok {
+			return // redirigé vers /login
 		}
-
-		sess, ok := sessions[c.Value]
-		if !ok || time.Now().After(sess.expiry) {
-			http.Error(w, "Session expirée", http.StatusUnauthorized)
-			return
-		}
-
-		Users_id := sess.userid
 		Users_idstr := strconv.Itoa(Users_id)
 
 		folder_idstr := r.FormValue("folder_id")
@@ -800,19 +791,10 @@ func CloudCorbeilleHandle(w http.ResponseWriter, r *http.Request) {
 	//var rootId int
 	switch r.Method {
 	case http.MethodGet:
-		c, err := r.Cookie("session_token")
-		if err != nil {
-			http.Error(w, "Non authentifié", http.StatusUnauthorized)
-			return
+		Users_id, ok := requireSession(w, r)
+		if !ok {
+			return // redirigé vers /login
 		}
-
-		sess, ok := sessions[c.Value]
-		if !ok || time.Now().After(sess.expiry) {
-			http.Error(w, "Session expirée", http.StatusUnauthorized)
-			return
-		}
-
-		Users_id := sess.userid
 
 		folder_idstr := r.FormValue("folder_id")
 		if folder_idstr != "" {
@@ -1316,6 +1298,147 @@ func restorfolder(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/cloud/corbeille/", http.StatusSeeOther)
 }
 
+func uploadFolder(w http.ResponseWriter, r *http.Request) {
+	var rootid int
+	Users_id, ok := requireSession(w, r)
+	if !ok {
+		return // redirigé vers /login
+	}
+	Users_idstr := strconv.Itoa(Users_id)
+
+	// 1) Nom du dossier dans le cloud (tapé par l'utilisateur)
+	cloudFolderName := r.FormValue("cloud_folder_name")
+	if cloudFolderName == "" {
+		cloudFolderName = "Dossier_sans_nom"
+	}
+
+	if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND nom = 'root' AND parent_id IS NULL AND deleted_at IS NULL", &Users_id).Scan(&rootid); err != nil {
+		http.Error(w, "ERREUR de scan folder", http.StatusInternalServerError)
+		return
+	}
+
+	// 2) Parse du multipart
+	err = r.ParseMultipartForm(0)
+	if err != nil {
+		http.Error(w, "ERREUR de ParseMultipartForm", http.StatusInternalServerError)
+		return
+	}
+
+	form := r.MultipartForm
+	files := form.File["files"]
+	paths := form.Value["paths"]
+
+	// 3) Pour chaque fichier reçu
+	for i, fh := range files {
+		extension := filepath.Ext(fh.Filename)
+		if extension == ".DS_Store" {
+			continue
+		}
+		Struuid := NewUUIDv4()
+		relPath := fh.Filename                     // ici tu as juste le nom du fichier
+		name := filepath.Base(Struuid + extension) // ex: "Capture d’écran ....png"
+		TimeNow := time.Now()
+
+		virtualPath := paths[i] // ex: "testcloud/sous/file.png"
+		fmt.Println("file:", fh.Filename, "virtual:", virtualPath)
+		folderID, err := RootFolderupload(Users_id, rootid, virtualPath, TimeNow)
+		if err != nil {
+			http.Error(w, "erreur d'arbre dossier", http.StatusInternalServerError)
+			return
+		}
+
+		rootstorage := "../storage/" + Users_idstr + "/root/"
+
+		dstPath := filepath.Join(rootstorage, name)
+		fmt.Println("sauvegarde vers :", dstPath)
+
+		// 4) Ouverture du fichier envoyé
+		src, err := fh.Open()
+		if err != nil {
+			http.Error(w, "ERREUR ouverture fichier", http.StatusInternalServerError)
+			return
+		}
+		defer src.Close()
+
+		// 5) Création du fichier côté serveur
+		dst, err := os.Create(dstPath)
+		if err != nil {
+			http.Error(w, "ERREUR création fichier serveur", http.StatusInternalServerError)
+			return
+		}
+
+		// 6) Copie des données
+		ExactSizeBytes, err := io.Copy(dst, src)
+		if err != nil {
+			http.Error(w, "ERREUR copie fichier", http.StatusInternalServerError)
+			return
+		}
+		dst.Close()
+
+		f := File{
+			UsersID:      Users_id,
+			FolderID:     folderID,
+			OriginalName: relPath,
+			StoredPath:   "storage/" + Users_idstr + "/root/" + cloudFolderName + "/" + Struuid + extension,
+			MimeType:     fh.Header.Get("content-type"),
+			SizeBytes:    ExactSizeBytes,
+			CreatedAt:    TimeNow,
+		}
+
+		// ici plus tard tu pourras faire un INSERT dans ta table files
+		_, err = db.Exec("INSERT INTO files (users_id,folder_id,original_name,stored_path,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?)", &f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt)
+		if err != nil {
+			http.Error(w, "ERREUR de insert files", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// 7) Redirection après l’upload
+	http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
+}
+
+func RootFolderupload(UserId int, RootId int, virtualPath string, TimeNow time.Time) (int, error) {
+	parts := strings.Split(virtualPath, "/")
+	if len(parts) <= 1 {
+		return RootId, nil
+	}
+
+	currentParent := RootId
+
+	dirs := parts[:len(parts)-1]
+	for _, name := range dirs {
+		if name == "" {
+			continue
+		}
+
+		var id int
+		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND nom = ? AND deleted_at IS NULL AND parent_id = ?",
+			&UserId, &name, &currentParent).Scan(&id); err == sql.ErrNoRows {
+			folder := Folder{
+				Nom:        name,
+				Parent_id:  currentParent,
+				Users_id:   UserId,
+				Created_at: TimeNow,
+			}
+			res, err := db.Exec("INSERT INTO folders (users_id, nom, parent_id, created_at) VALUES (?,?,?,?)", &folder.Users_id, &folder.Nom, &folder.Parent_id, &folder.Created_at)
+			if err != nil {
+				return 0, err
+			}
+
+			newID, err := res.LastInsertId()
+			if err != nil {
+				return 0, err
+			}
+			id = int(newID)
+		} else if err != nil {
+			return 0, err
+		}
+		currentParent = id
+	}
+
+	return currentParent, nil
+}
+
 // handlefunc
 
 func loginhandle(w http.ResponseWriter, r *http.Request) {
@@ -1416,7 +1539,6 @@ func verifyhandle(w http.ResponseWriter, r *http.Request) {
 		}
 		if is_verified != 0 || time.Now().After(verify_expires_at) || code != verify_token {
 			http.Error(w, "Code invalide ou expiré", http.StatusUnauthorized)
-			tpl, _ := parseTemplates()
 			tpl.ExecuteTemplate(w, "verify.html", nil)
 			return
 		}
@@ -1521,6 +1643,34 @@ func Logouthandle(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "login.html", http.StatusSeeOther)
 }
 
+func getAuthenticatedUserID(r *http.Request) (int, bool) {
+	c, err := r.Cookie("session_token")
+	if err != nil {
+		return 0, false
+	}
+
+	sess, ok := sessions[c.Value]
+	if !ok {
+		return 0, false
+	}
+
+	if time.Now().After(sess.expiry) {
+		delete(sessions, c.Value)
+		return 0, false
+	}
+
+	return sess.userid, true
+}
+
+func requireSession(w http.ResponseWriter, r *http.Request) (int, bool) {
+	userID, ok := getAuthenticatedUserID(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return 0, false
+	}
+	return userID, true
+}
+
 // main
 func main() {
 	// chargement .env
@@ -1562,6 +1712,7 @@ func main() {
 	http.HandleFunc("/harddeleteFolder", harddeleteFolder)
 	http.HandleFunc("/restorfile", restorfile)
 	http.HandleFunc("/restorfolder", restorfolder)
+	http.HandleFunc("/uploadfolder", uploadFolder)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)

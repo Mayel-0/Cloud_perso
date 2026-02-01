@@ -16,6 +16,40 @@
     <input type="submit" value="Upload this file" />
   </form>
 
+  <form id="form-id" action="/uploadfolder" method="post" enctype="multipart/form-data">
+    <input type="text" name="cloud_folder_name" placeholder="Nom du dossier (ex: testcloud)">
+    <input type="file" name="files" id="files" webkitdirectory multiple>
+    <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
+    <input type="submit" value="Upload ce dossier" />
+  </form>
+  <script>
+    const input = document.getElementById("files");
+    const form  = document.getElementById("form-id");
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      const data = new FormData(form);
+
+      // vider d’abord les fichiers ajoutés automatiquement par le form (optionnel)
+      // puis les ré‑ajouter proprement avec leurs paths
+      data.delete("files");
+
+      Array.from(input.files).forEach((file) => {
+        data.append("files", file);                     // le fichier
+        data.append("paths", file.webkitRelativePath);  // son chemin virtuel
+        console.log('name:', file.name, 'relative:', file.webkitRelativePath);
+      });
+
+      fetch("/uploadfolder", {
+        method: "POST",
+        body: data,
+      }).then(() => {
+        // éventuellement, reload/redirection côté front
+      });
+    });
+  </script>
+
   <form action="/createfolder" method="post">
     <label>Nom du dossier</label>
     <input type="text" id="name" name="name">
