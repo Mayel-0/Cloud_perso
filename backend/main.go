@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
@@ -631,7 +633,7 @@ func collectFolderTreeIDs(userID, startFolderID int) ([]int, error) {
 
 		// récupérer les enfants directs de current
 		rows, err := db.Query(
-			"SELECT id FROM folders WHERE users_id = ? AND parent_id = ? AND deleted_at IS NULL",
+			"SELECT id FROM folders WHERE users_id = ? AND parent_id = ?",
 			userID, current,
 		)
 		if err != nil {
@@ -742,7 +744,7 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 			file = append(file, f)
 		}
 
-		listCrumb, err := rootbreadcrumb(folder_id, w, r)
+		listCrumb, err := rootbreadcrumb(folder_id, Users_id)
 		if err != nil {
 			http.Error(w, "Erreur listcrumb", http.StatusInternalServerError)
 			return
@@ -880,29 +882,12 @@ func generateCode() (string, error) {
 	return string(codes), nil
 }
 
-func rootbreadcrumb(idstart int, w http.ResponseWriter, r *http.Request) ([]Crumbs, error) {
-
+func rootbreadcrumb(idstart int, Users_id int) ([]Crumbs, error) {
 	var crumbs []Crumbs
 	var C Crumbs
 	var parent sql.NullInt64
-
-	c, err := r.Cookie("session_token")
-	if err != nil {
-		http.Error(w, "Non authentifié", http.StatusUnauthorized)
-		return nil, err
-	}
-
-	sess, ok := sessions[c.Value]
-	if !ok || time.Now().After(sess.expiry) {
-		http.Error(w, "Session expirée", http.StatusUnauthorized)
-		return nil, err
-	}
-
-	Users_id := sess.userid
-
 	for {
 		if err = db.QueryRow("SELECT id, parent_id, nom FROM folders WHERE id = ? AND users_id = ? AND deleted_at IS NULL", &idstart, &Users_id).Scan(&C.Id, &parent, &C.Name); err != nil {
-			http.Error(w, "ERREUR de crumbs", http.StatusInternalServerError)
 			return nil, err
 		}
 		crumbs = append(crumbs, C)
@@ -1070,6 +1055,20 @@ func HardDeleteAll(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		rows, err := db.Query("SELECT stored_path FROM files WHERE deleted_at IS NOT NULL")
+		if err != nil {
+			http.Error(w, "erreur de select delete", http.StatusInternalServerError)
+			return
+		}
+
+		defer rows.Close()
+
+		for rows.Next() {
+			var f File
+			rows.Scan(&f.StoredPath)
+			os.Remove("../" + f.StoredPath)
+		}
+
 		_, err = db.Exec("DELETE FROM folders WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
 		if err != nil {
 			http.Error(w, "ERREUR supresion des folders", http.StatusInternalServerError)
@@ -1109,6 +1108,41 @@ func harddeleteFolder(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, "ERRERU convertion atoi", http.StatusInternalServerError)
 			return
+		}
+
+		ListId, err := collectFolderTreeIDs(Users_id, folder_id)
+		if err != nil {
+			http.Error(w, "erreur collectFolderTreeIDs", http.StatusInternalServerError)
+			return
+		}
+
+		placeholder := make([]string, len(ListId))
+		for i := range placeholder {
+			placeholder[i] = "?"
+		}
+
+		inClause := strings.Join(placeholder, ",")
+
+		args := make([]interface{}, 0, len(ListId)+1)
+		args = append(args, Users_id)
+		for _, id := range ListId {
+			args = append(args, id)
+		}
+
+		query := "SELECT stored_path FROM files WHERE deleted_at IS NOT NULL AND users_id = ? AND folder_id IN (" + inClause + ")"
+
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			http.Error(w, "erreur de select id", http.StatusInternalServerError)
+			return
+		}
+
+		defer rows.Close()
+
+		for rows.Next() {
+			var f File
+			rows.Scan(&f.StoredPath)
+			os.Remove("../" + f.StoredPath)
 		}
 
 		_, err = db.Exec("DELETE FROM folders WHERE users_id = ? AND id = ? AND deleted_at IS NOT NULL", &Users_id, &folder_id)
@@ -1379,7 +1413,7 @@ func uploadFolder(w http.ResponseWriter, r *http.Request) {
 			UsersID:      Users_id,
 			FolderID:     folderID,
 			OriginalName: relPath,
-			StoredPath:   "storage/" + Users_idstr + "/root/" + cloudFolderName + "/" + Struuid + extension,
+			StoredPath:   "storage/" + Users_idstr + "/root/" + Struuid + extension,
 			MimeType:     fh.Header.Get("content-type"),
 			SizeBytes:    ExactSizeBytes,
 			CreatedAt:    TimeNow,
@@ -1671,6 +1705,129 @@ func requireSession(w http.ResponseWriter, r *http.Request) (int, bool) {
 	return userID, true
 }
 
+func downloadFolder(w http.ResponseWriter, r *http.Request) {
+	var f []File
+	Users_id, ok := requireSession(w, r)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !ok {
+		return // redirigé vers /login
+	}
+	//Users_idstr := strconv.Itoa(Users_id)
+
+	Folder_idstr := r.FormValue("folder_id")
+	Folder_id, err := strconv.Atoi(Folder_idstr)
+
+	folder_namestr := r.FormValue("folder_namestr")
+	if err != nil {
+		http.Error(w, "erreur de convertion folder", http.StatusInternalServerError)
+		return
+	}
+	ListId, err := collectFolderTreeIDs(Users_id, Folder_id)
+	if err != nil {
+		http.Error(w, "erreur de list d'id", http.StatusInternalServerError)
+		return
+	}
+	fmt.Print(ListId)
+
+	placeholder := make([]string, len(ListId))
+	for i := range placeholder {
+		placeholder[i] = "?"
+	}
+
+	inClause := strings.Join(placeholder, ",")
+
+	args := make([]interface{}, 0, len(ListId)+1)
+	args = append(args, Users_id)
+	for _, id := range ListId {
+		args = append(args, id)
+	}
+
+	query := "SELECT * FROM files WHERE deleted_at IS NULL AND users_id = ? AND folder_id IN(" + inClause + ")"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		http.Error(w, "erreur de select", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var file File
+		rows.Scan(&file.ID, &file.UsersID, &file.FolderID, &file.OriginalName, &file.StoredPath, &file.MimeType, &file.SizeBytes, &file.CreatedAt, &file.DeletedAt)
+
+		f = append(f, file)
+	}
+
+	buf := &bytes.Buffer{}
+	zw := zip.NewWriter(buf)
+
+	if err = CreateZip(zw, ListId, f, Users_id); err != nil {
+		http.Error(w, "erreur createzip", http.StatusInternalServerError)
+		return
+	}
+
+	if err = zw.Close(); err != nil {
+		http.Error(w, "erreur dans la fermeture du zip", http.StatusInternalServerError)
+		return
+	}
+
+	// headers HTTP pour le téléchargement
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+folder_namestr+`"`)
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		log.Println(err)
+	}
+}
+
+func CreateZip(zw *zip.Writer, ListId []int, file []File, User_id int) error {
+	for _, id := range ListId {
+		for _, currentfile := range file {
+			if currentfile.FolderID != id {
+				continue
+			}
+			root, err := rootbreadcrumb(id, User_id)
+			if err != nil {
+				return err
+			}
+
+			parts := make([]string, 0, len(root)-1)
+
+			for i, namepart := range root {
+				if i == 0 {
+					continue
+				}
+				parts = append(parts, namepart.Name)
+			}
+			pathname := strings.Join(parts, "/")
+
+			zipPath := pathname + "/" + currentfile.OriginalName
+
+			fw, err := zw.Create(zipPath)
+			if err != nil {
+				return err
+			}
+
+			src, err := os.Open("../" + currentfile.StoredPath)
+			if err != nil {
+				return err
+			}
+
+			if _, err = io.Copy(fw, src); err != nil {
+				src.Close()
+				return err
+			}
+			src.Close()
+		}
+	}
+	return nil
+}
+
 // main
 func main() {
 	// chargement .env
@@ -1713,6 +1870,7 @@ func main() {
 	http.HandleFunc("/restorfile", restorfile)
 	http.HandleFunc("/restorfolder", restorfolder)
 	http.HandleFunc("/uploadfolder", uploadFolder)
+	http.HandleFunc("/downloadfolder", downloadFolder)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)

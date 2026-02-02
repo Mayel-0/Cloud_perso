@@ -64,6 +64,33 @@
     <label>/</label>
   {{end}}
 
+    {{range .Folders}}
+    <h1>{{.Nom}}</h1>
+    <form action="/deletefolder" method="post">
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+      <button type="submit">Supprimer</button>
+    </form>
+    <form action="/cloud/acceuil/" method="get">
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+      <button type="submit">Ouvrir</button>
+    </form>
+
+    <form action="/renamefolder" method="post">
+      <input type="text" name="newname" id="newname" placeholder="{{.Nom}}">
+      <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+    </form>
+
+    <form action="/downloadfolder" method="post">
+      <input type="hidden" name="folder_id" value="{{.Id}}">
+      <input type="hidden" name="folder_namestr" value="{{.Nom}}">
+      <button type="submit">download</button>
+    </form>
+    {{if and $.ErrorMsg (eq $.ErrorFolderID .Id)}}
+      <p>{{$.ErrorMsg}}</p>
+    {{end}}
+  {{end}}
+
   {{range .Files}}
     <h1>{{.OriginalName}}</h1>
     <form action="/deletefile" method="post">
@@ -81,27 +108,6 @@
       <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
     </form>
     {{if and $.ErrorMsg (eq $.ErrorFileID .ID)}}
-      <p>{{$.ErrorMsg}}</p>
-    {{end}}
-  {{end}}
-
-  {{range .Folders}}
-    <h1>{{.Nom}}</h1>
-    <form action="/deletefolder" method="post">
-      <input type="hidden" name="folder_id" value="{{.Id}}">
-      <button type="submit">Supprimer</button>
-    </form>
-    <form action="/cloud/acceuil/" method="get">
-      <input type="hidden" name="folder_id" value="{{.Id}}">
-      <button type="submit">Ouvrir</button>
-    </form>
-
-    <form action="/renamefolder" method="post">
-      <input type="text" name="newname" id="newname" placeholder="{{.Nom}}">
-      <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
-      <input type="hidden" name="folder_id" value="{{.Id}}">
-    </form>
-    {{if and $.ErrorMsg (eq $.ErrorFolderID .Id)}}
       <p>{{$.ErrorMsg}}</p>
     {{end}}
   {{end}}
