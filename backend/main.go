@@ -66,6 +66,8 @@ type PageData struct {
 	ErrorMsg        string
 	ErrorFileID     int
 	ErrorFolderID   int
+	MoveType        string // "file" ou "folder"
+	MoveID          int
 }
 
 type Crumbs struct {
@@ -127,6 +129,7 @@ func parseTemplates() (*template.Template, error) {
 		"../frontend/src/html/cloud_acceuil.html",
 		"../frontend/src/html/cloud_corbeille.html",
 		"../frontend/src/html/harddeleteall.html",
+		"../frontend/src/html/cloud_move.html",
 	)
 	if err != nil {
 		println("ERREUR func PARSETEMPLATES")
@@ -787,8 +790,6 @@ func CloudAcceuilHandle(w http.ResponseWriter, r *http.Request) {
 func CloudCorbeilleHandle(w http.ResponseWriter, r *http.Request) {
 	var folder []Folder
 	var file []File
-	var folder_id int
-	var rootId int
 	//var folder_id int
 	//var rootId int
 	switch r.Method {
@@ -798,60 +799,44 @@ func CloudCorbeilleHandle(w http.ResponseWriter, r *http.Request) {
 			return // redirigé vers /login
 		}
 
-		folder_idstr := r.FormValue("folder_id")
-		if folder_idstr != "" {
-			folder_id, err = strconv.Atoi(folder_idstr)
-			if err != nil {
-				http.Error(w, "convertion folder_id", http.StatusInternalServerError)
-				return
-			}
-		} else {
-			folder_id = 0
-		}
-
-		if folder_id == 0 {
-			folder_id = rootId
-		}
-
 		rowsfolder, err := db.Query("SELECT * FROM folders WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
 		if err != nil {
-			http.Error(w, "ERREUR de select folder", http.StatusInternalServerError)
+			http.Error(w, "ERREUR Select", http.StatusInternalServerError)
 			return
 		}
-
 		defer rowsfolder.Close()
 
 		for rowsfolder.Next() {
 			var f Folder
 			if err = rowsfolder.Scan(&f.Id, &f.Users_id, &f.Nom, &f.Parent_id, &f.Created_at, &f.DeletedAt); err != nil {
-				http.Error(w, "erreur scan", http.StatusInternalServerError)
+				http.Error(w, "ERREUR scan", http.StatusInternalServerError)
 				return
 			}
 			folder = append(folder, f)
 		}
 
-		rowsfilde, err := db.Query("SELECT * FROM files WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
+		rowsfile, err := db.Query("SELECT * FROM files WHERE users_id = ? AND deleted_at IS NOT NULL", &Users_id)
 		if err != nil {
-			http.Error(w, "ERREUR de select files", http.StatusInternalServerError)
+			http.Error(w, "ERREUR Select", http.StatusInternalServerError)
 			return
 		}
 
-		defer rowsfilde.Close()
+		defer rowsfile.Close()
 
-		for rowsfilde.Next() {
+		for rowsfile.Next() {
 			var f File
-			if err = rowsfilde.Scan(&f.ID, &f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt, &f.DeletedAt); err != nil {
-				http.Error(w, "erreur scan", http.StatusInternalServerError)
+			if err = rowsfile.Scan(&f.ID, &f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt, &f.DeletedAt); err != nil {
+				http.Error(w, "ERREUR scan", http.StatusInternalServerError)
 				return
 			}
 			file = append(file, f)
 		}
 
-		//listCrumb, err := rootbreadcrumb(folder_id, w, r)
+		/*listCrumb, err := rootbreadcrumb(folder_id, Users_id)
 		if err != nil {
 			http.Error(w, "Erreur listcrumb", http.StatusInternalServerError)
 			return
-		}
+		}*/
 		data := PageData{
 			Folders: folder,
 			Files:   file,
@@ -887,7 +872,7 @@ func rootbreadcrumb(idstart int, Users_id int) ([]Crumbs, error) {
 	var C Crumbs
 	var parent sql.NullInt64
 	for {
-		if err = db.QueryRow("SELECT id, parent_id, nom FROM folders WHERE id = ? AND users_id = ? AND deleted_at IS NULL", &idstart, &Users_id).Scan(&C.Id, &parent, &C.Name); err != nil {
+		if err = db.QueryRow("SELECT id, parent_id, nom FROM folders WHERE id = ? AND users_id = ?", &idstart, &Users_id).Scan(&C.Id, &parent, &C.Name); err != nil {
 			return nil, err
 		}
 		crumbs = append(crumbs, C)
@@ -1306,26 +1291,22 @@ func restorfolder(w http.ResponseWriter, r *http.Request) {
 
 	restoreFolderChain(Users_id, folder_id)
 
-	// 1) récupérer tous les folder_id du sous-arbre
+	// 2) tous les folders du sous-arbre
 	folderIDs, err := collectFolderTreeIDs(Users_id, folder_id)
 	if err != nil {
 		http.Error(w, "ERREUR collecte folders", http.StatusInternalServerError)
 		return
 	}
 
+	// 3) restore files de ces folders
 	if err := restoreFilesByFolderIDs(Users_id, folderIDs); err != nil {
-		http.Error(w, "ERREUR soft delete files", http.StatusInternalServerError)
+		http.Error(w, "ERREUR restore files", http.StatusInternalServerError)
 		return
 	}
 
-	if err := softDeleteFoldersByIDs(Users_id, folderIDs); err != nil {
-		http.Error(w, "ERREUR soft delete folders", http.StatusInternalServerError)
-		return
-	}
-
-	_, err = db.Exec("UPDATE folders SET deleted_at = NULL WHERE users_id = ? AND id = ? AND deleted_at IS NOT NULL", &Users_id, &folder_id)
-	if err != nil {
-		http.Error(w, "ERREUR de update", http.StatusInternalServerError)
+	// 4) restore folders du sous-arbre (enfants + racine)
+	if err := restoreFoldersByIDs(Users_id, folderIDs); err != nil {
+		http.Error(w, "ERREUR restore folders", http.StatusInternalServerError)
 		return
 	}
 
@@ -1828,6 +1809,159 @@ func CreateZip(zw *zip.Writer, ListId []int, file []File, User_id int) error {
 	return nil
 }
 
+func moveHandle(w http.ResponseWriter, r *http.Request) {
+	var folder_id int
+	var rootId int
+	var folder []Folder
+	var file []File
+	switch r.Method {
+	case http.MethodGet:
+		Users_id, ok := requireSession(w, r)
+		if !ok {
+			return // redirigé vers /login
+		}
+		//Users_idstr := strconv.Itoa(Users_id)
+
+		folder_idstr := r.FormValue("folder_id")
+		moveType := r.FormValue("type") // "file" ou "folder"
+		moveIDStr := r.FormValue("id")
+		moveID, _ := strconv.Atoi(moveIDStr)
+		if folder_idstr != "" {
+			folder_id, err = strconv.Atoi(folder_idstr)
+			if err != nil {
+				http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			folder_id = 0
+		}
+
+		if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root' AND deleted_at IS NULL", &Users_id).Scan(&rootId); err != nil {
+			log.Println("Erreur QueryRow root:", err)
+			http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
+			return
+		}
+
+		if folder_id == 0 {
+			folder_id = rootId
+		}
+
+		rowsfolder, err := db.Query("SELECT * FROM folders WHERE users_id = ? AND parent_id = ?  AND deleted_at IS NULL", &Users_id, &folder_id)
+		if err != nil {
+			http.Error(w, "ERREUR Select", http.StatusInternalServerError)
+			return
+		}
+		defer rowsfolder.Close()
+
+		for rowsfolder.Next() {
+			var f Folder
+			if err = rowsfolder.Scan(&f.Id, &f.Users_id, &f.Nom, &f.Parent_id, &f.Created_at, &f.DeletedAt); err != nil {
+				http.Error(w, "ERREUR scan", http.StatusInternalServerError)
+				return
+			}
+			folder = append(folder, f)
+		}
+
+		rowsfile, err := db.Query("SELECT * FROM files WHERE users_id = ? AND folder_id = ? AND deleted_at IS NULL", &Users_id, &folder_id)
+		if err != nil {
+			http.Error(w, "ERREUR Select", http.StatusInternalServerError)
+			return
+		}
+
+		defer rowsfile.Close()
+
+		for rowsfile.Next() {
+			var f File
+			if err = rowsfile.Scan(&f.ID, &f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt, &f.DeletedAt); err != nil {
+				http.Error(w, "ERREUR scan", http.StatusInternalServerError)
+				return
+			}
+			file = append(file, f)
+		}
+
+		listCrumb, err := rootbreadcrumb(folder_id, Users_id)
+		if err != nil {
+			http.Error(w, "Erreur listcrumb", http.StatusInternalServerError)
+			return
+		}
+
+		data := PageData{
+			Folders:         folder,
+			Files:           file,
+			CurrentFolderID: folder_id,
+			Crumb:           listCrumb,
+			MoveType:        moveType,
+			MoveID:          moveID,
+		}
+
+		if err = tpl.ExecuteTemplate(w, "cloud_move.html", data); err != nil {
+			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
+			return
+		}
+
+	case http.MethodPost:
+		Users_id, ok := requireSession(w, r)
+		if !ok {
+			return
+		}
+
+		moveType := r.FormValue("type")
+		idStr := r.FormValue("id")
+		destStr := r.FormValue("destination_folder_id")
+
+		id, err := strconv.Atoi(idStr)
+		if err != nil { /* handle */
+		}
+		destID, err := strconv.Atoi(destStr)
+		if err != nil { /* handle */
+		}
+
+		if moveType == "folder" && id == destID {
+			http.Error(w, "Impossible de déplacer un dossier dans lui-même", http.StatusBadRequest)
+			return
+		}
+
+		if moveType == "folder" {
+			descendants, err := collectFolderTreeIDs(Users_id, id)
+			if err != nil { /* handle */
+			}
+
+			for _, d := range descendants {
+				if d == destID {
+					http.Error(w, "Impossible de déplacer un dossier dans un de ses sous-dossiers", http.StatusBadRequest)
+					return
+				}
+			}
+		}
+
+		switch moveType {
+		case "file":
+			_, err = db.Exec(
+				"UPDATE files SET folder_id = ? WHERE id = ? AND users_id = ?",
+				destID, id, Users_id,
+			)
+		case "folder":
+			_, err = db.Exec(
+				"UPDATE folders SET parent_id = ? WHERE id = ? AND users_id = ?",
+				destID, id, Users_id,
+			)
+		default:
+			http.Error(w, "type invalide", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "erreur move", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
+
+	default:
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
 // main
 func main() {
 	// chargement .env
@@ -1871,6 +2005,8 @@ func main() {
 	http.HandleFunc("/restorfolder", restorfolder)
 	http.HandleFunc("/uploadfolder", uploadFolder)
 	http.HandleFunc("/downloadfolder", downloadFolder)
+
+	http.HandleFunc("/cloud/replace/", moveHandle)
 
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)

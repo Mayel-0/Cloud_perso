@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Corbeille</title>
+</head>
+<body>
+  <h1>Bienvenue sur le Cloud ||replace</h1>
+
+  <h2>route</h2>
+  {{range .Crumb}}
+    <a href="/cloud/replace/?folder_id={{.Id}}&type={{$.MoveType}}&id={{$.MoveID}}">{{.Name}}</a>
+    <label>/</label>
+  {{end}}
+
+  {{range .Folders}}
+    <h1>{{.Nom}}</h1>
+    <li>
+      <a href="/cloud/replace/?folder_id={{.Id}}&type={{$.MoveType}}&id={{$.MoveID}}">{{.Nom}}</a>
+    </li>
+  {{end}}
+
+  <form action="/cloud/replace/" method="post">
+    <input type="hidden" name="type" value="{{.MoveType}}">
+    <input type="hidden" name="id" value="{{.MoveID}}">
+    <input type="hidden" name="destination_folder_id" value="{{.CurrentFolderID}}">
+    <button type="submit">Déplacer ici</button>
+  </form>
+
+  {{range .Files}}
+    <h1>{{.OriginalName}}</h1>
+  {{end}}
+
+</body>
+</html>

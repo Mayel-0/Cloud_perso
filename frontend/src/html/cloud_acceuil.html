@@ -86,6 +86,12 @@
       <input type="hidden" name="folder_namestr" value="{{.Nom}}">
       <button type="submit">download</button>
     </form>
+
+    <form action="/cloud/replace/" method="get">
+      <input type="hidden" name="type" value="folder">
+      <input type="hidden" name="id" value="{{.Id}}">
+      <button type="submit">Move</button>
+    </form>
     {{if and $.ErrorMsg (eq $.ErrorFolderID .Id)}}
       <p>{{$.ErrorMsg}}</p>
     {{end}}
@@ -106,6 +112,12 @@
       <input type="hidden" name="file_id" value="{{.ID}}">
       <input type="text" name="newname" id="newname" placeholder="{{.OriginalName}}">
       <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
+    </form>
+
+    <form action="/cloud/replace/" method="get">
+      <input type="hidden" name="type" value="file">
+      <input type="hidden" name="id" value="{{.ID}}">
+      <button type="submit">move</button>
     </form>
     {{if and $.ErrorMsg (eq $.ErrorFileID .ID)}}
       <p>{{$.ErrorMsg}}</p>
