@@ -11,16 +11,16 @@
   <label for="avatar">Choose a profile picture:</label>
 
   <form action="/upload" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" />
+    <input type="file" name="file" required />
     <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
-    <input type="submit" value="Upload this file" />
+    <button type="submit">Upload this file</button>
   </form>
 
   <form id="form-id" action="/uploadfolder" method="post" enctype="multipart/form-data">
-    <input type="text" name="cloud_folder_name" placeholder="Nom du dossier (ex: testcloud)">
-    <input type="file" name="files" id="files" webkitdirectory multiple>
+    <input type="text" name="cloud_folder_name" placeholder="Nom du dossier">
+    <input type="file" name="files" id="files" webkitdirectory multiple required>
     <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
-    <input type="submit" value="Upload ce dossier" />
+    <button type="submit">Upload ce dossier</button>
   </form>
   <script>
     const input = document.getElementById("files");
@@ -64,8 +64,9 @@
     <label>/</label>
   {{end}}
 
-    {{range .Folders}}
+  {{range .Folders}}
     <h1>{{.Nom}}</h1>
+    {{template "FolderLogo"}}
     <form action="/deletefolder" method="post">
       <input type="hidden" name="folder_id" value="{{.Id}}">
       <button type="submit">Supprimer</button>
@@ -99,6 +100,7 @@
 
   {{range .Files}}
     <h1>{{.OriginalName}}</h1>
+    {{template "FileLogo"}}
     <form action="/deletefile" method="post">
       <input type="hidden" name="file_id" value="{{.ID}}">
       <input type="hidden" name="Users_id" value="{{.}}">

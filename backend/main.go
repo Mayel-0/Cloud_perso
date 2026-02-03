@@ -130,6 +130,8 @@ func parseTemplates() (*template.Template, error) {
 		"../frontend/src/html/cloud_corbeille.html",
 		"../frontend/src/html/harddeleteall.html",
 		"../frontend/src/html/cloud_move.html",
+		"../frontend/src/svg/folder.html",
+		"../frontend/src/svg/file.html",
 	)
 	if err != nil {
 		println("ERREUR func PARSETEMPLATES")
@@ -1408,8 +1410,10 @@ func uploadFolder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	currentfolder_idstr := r.FormValue("folder_id")
+
 	// 7) Redirection après l’upload
-	http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
+	http.Redirect(w, r, "/cloud/acceuil/?folder_id="+currentfolder_idstr, http.StatusSeeOther)
 }
 
 func RootFolderupload(UserId int, RootId int, virtualPath string, TimeNow time.Time) (int, error) {
@@ -1758,7 +1762,7 @@ func downloadFolder(w http.ResponseWriter, r *http.Request) {
 
 	// headers HTTP pour le téléchargement
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+folder_namestr+`"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+folder_namestr+`.zip"`)
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 
 	if _, err := w.Write(buf.Bytes()); err != nil {
