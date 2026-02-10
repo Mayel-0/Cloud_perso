@@ -135,7 +135,6 @@ func parseTemplates() (*template.Template, error) {
 		"../frontend/src/html/cloud_move.html",
 		"../frontend/src/svg/folder.html",
 		"../frontend/src/svg/file.html",
-		"../frontend/src/svg/menu.html",
 		"../frontend/src/svg/add.html",
 	)
 	if err != nil {
@@ -946,12 +945,23 @@ func renamedossier(w http.ResponseWriter, r *http.Request) {
 }
 
 func renameKeepAllExt(oldName, newBase string) string {
-	dot := strings.Index(oldName, ".")
+	// Extensions doubles courantes à préserver
+	doubleExts := []string{".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst"}
+
+	// Vérifier les extensions doubles
+	for _, ext := range doubleExts {
+		if strings.HasSuffix(oldName, ext) {
+			return newBase + ext
+		}
+	}
+
+	// Sinon, prendre uniquement la dernière extension (après le dernier point)
+	dot := strings.LastIndex(oldName, ".")
 	if dot == -1 {
 		// pas d'extension
 		return newBase
 	}
-	ext := oldName[dot:] // tout à partir du premier point: ".tar.gz", ".png", etc.
+	ext := oldName[dot:] // extension simple: ".png", ".jpg", etc.
 	return newBase + ext
 }
 

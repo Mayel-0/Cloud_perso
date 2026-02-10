@@ -59,7 +59,7 @@
             </div>
           </div>
         {{if and $.ErrorMsg (eq $.ErrorFolderID .Id)}}
-          <p>{{$.ErrorMsg}}</p>
+          <p class="ErrorMsg">{{$.ErrorMsg}}</p>
         {{end}}
         </div>
       </div>
@@ -106,7 +106,7 @@
         </div>
 
         {{if and $.ErrorMsg (eq $.ErrorFileID .ID)}}
-          <p>{{$.ErrorMsg}}</p>
+          <p class="ErrorMsg">{{$.ErrorMsg}}</p>
         {{end}}
       </div>
     {{end}}
