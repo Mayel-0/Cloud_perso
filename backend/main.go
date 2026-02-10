@@ -1514,11 +1514,11 @@ func loginhandle(w http.ResponseWriter, r *http.Request) {
 		expiresAt := time.Now().Add(5 * time.Minute)
 
 		println("voici le code : ", Code)
-		/*err = SendVerificationEmail(email, Code)
+		err = SendVerificationEmail(email, Code)
 		if err != nil {
 			fmt.Println("erreur dans l'envoie du mail")
 			return
-		}*/
+		}
 
 		_, err = db.Exec("INSERT INTO email_verification(users_id, verify_token, verify_expires_at, is_verified) VALUES (?,?,?,0)", User_id, Code, expiresAt)
 		if err != nil {

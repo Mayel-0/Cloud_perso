@@ -23,10 +23,6 @@
             <input type="hidden" name="folder_id" value="{{.Id}}">
             <button type="submit" class="btn-primary">♻️ Restaurer</button>
           </form>
-          <form action="/cloud/corbeille/" method="get">
-            <input type="hidden" name="folder_id" value="{{.Id}}">
-            <button type="submit" class="btn-secondary">👁️ Ouvrir</button>
-          </form>
           <form action="/harddeleteFolder" method="post">
             <input type="hidden" name="folder_id" value="{{.Id}}">
             <button type="submit" class="btn-danger">❌ Supprimer définitivement</button>
