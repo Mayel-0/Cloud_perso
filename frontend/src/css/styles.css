@@ -1,7 +1,17 @@
 :root {
-  --BackgroundColor: rgb(213, 213, 213) ;
-  --AccentColor: rgb(112, 164, 193) ;
-  --TextColor: rgb(0, 0, 0);
+  --BackgroundColor: #f5f5f5;
+  --AccentColor: #3089b8;
+  --AccentColorHover: #1c6c97;
+  --TextColor: #333;
+  --BorderColor: #ddd;
+  --CardBackground: #ffffff;
+  --DangerColor: #dc3545;
+  --DangerColorHover: #c82333;
+  --SuccessColor: #28a745;
+  --ShadowLight: 0 2px 8px rgba(0,0,0,0.1);
+  --ShadowMedium: 0 4px 12px rgba(0,0,0,0.15);
+  --BorderRadius: 12px;
+  --TransitionSpeed: 0.3s;
 }
 
 @font-face {
@@ -36,6 +46,691 @@
   font-style: italic;
 }
 
-h1,h2,h3,h4,h5,h6 {
-  font-family: "Boska-Variable";
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  background-color: var(--BackgroundColor);
+  font-family: 'GeneralSans-Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--TextColor);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Boska-Variable", serif;
+  color: var(--AccentColor);
+  margin: 0;
+  padding: 0;
+}
+
+h1 {
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+h2 {
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+p {
+  font-family: "GeneralSans-Variable", sans-serif;
+  line-height: 1.6;
+  margin: 0.5rem 0;
+}
+
+button {
+  cursor: pointer;
+  font-family: "GeneralSans-Variable", sans-serif;
+  transition: all var(--TransitionSpeed) ease;
+}
+
+button:hover {
+  transform: translateY(-2px);
+}
+
+input {
+  font-family: "GeneralSans-Variable", sans-serif;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+.ErrorMsg {
+  color: red;
+  font-weight: 400;
+}
+
+.containeur {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* acceuil.html */
+.containeurMain {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  height: 50%;
+  h1 {
+    font-family: "GeneralSans-VariableItalic";
+  }
+  .acceuil {
+    gap: 3rem;
+    margin-top: 80px;
+    text-align: center;
+    section {
+      width: 45%;
+      h2 {
+        font-weight: normal;
+      }
+    }
+    a {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      text-decoration: none;
+    }
+  }
+}
+
+section a button {
+  background-color: var(--CardBackground);
+  border-radius: 12px;
+  padding: 16px 32px;
+  border: 2px solid var(--AccentColor);
+  transition: all var(--TransitionSpeed) ease;
+  box-shadow: var(--ShadowLight);
+
+  h2 {
+    margin: 0;
+    color: var(--AccentColor);
+    font-size: 1.2rem;
+  }
+}
+
+section a button:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--ShadowMedium);
+  border-color: var(--AccentColorHover);
+  background-color: var(--AccentColor);
+
+  h2 {
+    color: white;
+  }
+}
+
+/* register.html */
+.containeurRegister {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 20px;
+
+  h1 {
+    font-family: "Boska-Variable", serif;
+    text-align: center;
+    margin-bottom: 40px;
+    font-size: 2.5rem;
+  }
+
+  .register {
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    background: var(--CardBackground);
+    padding: 40px;
+    border-radius: var(--BorderRadius);
+    box-shadow: var(--ShadowMedium);
+
+    label {
+      font-weight: 500;
+      color: var(--TextColor);
+      margin-bottom: -12px;
+      font-size: 14px;
+    }
+
+    input {
+      padding: 12px 16px;
+      border: 1px solid var(--BorderColor);
+      border-radius: 8px;
+      font-size: 16px;
+      transition: all var(--TransitionSpeed) ease;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--AccentColor);
+      box-shadow: 0 0 0 3px rgba(48, 137, 184, 0.1);
+    }
+
+    button {
+      padding: 14px 24px;
+      background: var(--AccentColor);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+
+    button:hover {
+      background: var(--AccentColorHover);
+    }
+  }
+}
+
+/* ============= CARDS (DOSSIERS + FICHIERS) ============= */
+.containeurCardFolder {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  padding: 20px;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.cardFolder {
+  background-color: var(--CardBackground);
+  border: 1px solid var(--BorderColor);
+  border-radius: var(--BorderRadius);
+  padding: 16px;
+  box-shadow: var(--ShadowLight);
+  transition: all var(--TransitionSpeed) ease;
+  position: relative;
+}
+
+.cardFolder:hover {
+  box-shadow: var(--ShadowMedium);
+  transform: translateY(-4px);
+}
+
+.cardFolder__Top {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.cardFolder__Top__left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 12px;
+
+  h1 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  form {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+  }
+
+  button {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+    text-align: left;
+    width: 100%;
+    min-width: 0;
+  }
+
+  svg {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* ============= MENUS DOSSIERS ============= */
+.menufolder__main {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.menufolder__button {
+  border: none;
+  background-color: transparent;
+  width: 40px;
+  height: 40px;
+  position: relative;
+  cursor: pointer;
+  padding: 8px;
+  font-size: 20px;
+  font-weight: bold;
+  border-radius: 8px;
+  transition: background-color var(--TransitionSpeed) ease;
+}
+
+.menufolder__button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* ============= MENUS FICHIERS ============= */
+.menufile__main {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.menufile__button {
+  border: none;
+  background-color: transparent;
+  width: 40px;
+  height: 40px;
+  position: relative;
+  cursor: pointer;
+  padding: 8px;
+  font-size: 20px;
+  font-weight: bold;
+  border-radius: 8px;
+  transition: background-color var(--TransitionSpeed) ease;
+}
+
+.menufile__button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* ============= BREADCRUMBS / ROUTE ============= */
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px;
+  background: var(--CardBackground);
+  border-radius: var(--BorderRadius);
+  margin: 20px;
+  box-shadow: var(--ShadowLight);
+  flex-wrap: wrap;
+}
+
+.breadcrumbs a {
+  color: var(--AccentColor);
+  font-weight: 500;
+  transition: color var(--TransitionSpeed) ease;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.breadcrumbs a:hover {
+  color: var(--AccentColorHover);
+  background: rgba(48, 137, 184, 0.1);
+}
+
+.breadcrumbs label {
+  color: var(--TextColor);
+  opacity: 0.5;
+}
+
+/* ============= PAGE HEADER ============= */
+.page-header {
+  padding: 30px 20px 10px;
+  text-align: center;
+}
+
+.page-header h1 {
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+}
+
+/* ============= UTILITY BUTTONS ============= */
+.btn-primary {
+  background: var(--AccentColor);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all var(--TransitionSpeed) ease;
+  box-shadow: var(--ShadowLight);
+}
+
+.btn-primary:hover {
+  background: var(--AccentColorHover);
+  box-shadow: var(--ShadowMedium);
+}
+
+.btn-secondary {
+  background: var(--CardBackground);
+  color: var(--AccentColor);
+  border: 2px solid var(--AccentColor);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all var(--TransitionSpeed) ease;
+}
+
+.btn-secondary:hover {
+  background: var(--AccentColor);
+  color: white;
+}
+
+.btn-danger {
+  background: var(--DangerColor);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: all var(--TransitionSpeed) ease;
+}
+
+.btn-danger:hover {
+  background: var(--DangerColorHover);
+}
+
+/* ============= CORBEILLE / TRASH ITEMS ============= */
+.trash-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.trash-item {
+  background: var(--CardBackground);
+  border: 1px solid var(--BorderColor);
+  border-radius: var(--BorderRadius);
+  padding: 20px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--ShadowLight);
+  transition: all var(--TransitionSpeed) ease;
+}
+
+.trash-item:hover {
+  box-shadow: var(--ShadowMedium);
+  transform: translateY(-2px);
+}
+
+.trash-item h1 {
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+.trash-item-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.trash-item-actions form {
+  margin: 0;
+}
+
+.trash-item-actions button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.action-bar {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  padding: 20px;
+  flex-wrap: wrap;
+}
+
+/* ============= MENUS (DOSSIERS + FICHIERS) ============= */
+.menufolder__details,
+.menufile__details {
+  display: flex;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  flex-direction: column;
+  min-width: 220px;
+  gap: 4px;
+  background: var(--CardBackground);
+  border: 1px solid var(--BorderColor);
+  border-radius: var(--BorderRadius);
+  box-shadow: var(--ShadowMedium);
+  z-index: 1000;
+  padding: 8px;
+}
+
+.menufolder__details.hidden,
+.menufile__details.hidden {
+  display: none;
+}
+
+/* Items menu (commun aux dossiers ET fichiers) */
+.menu-item {
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.menu-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.menu-item input[type="text"],
+.menu-item input[type="file"] {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--BorderColor);
+  border-radius: 6px;
+  font-size: 14px;
+  background: var(--CardBackground);
+  transition: border-color var(--TransitionSpeed) ease;
+}
+
+.menu-item input[type="text"]:focus,
+.menu-item input[type="file"]:focus {
+  outline: none;
+  border-color: var(--AccentColor);
+}
+
+.menu-item button {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--TextColor);
+  border-radius: 6px;
+  transition: all var(--TransitionSpeed) ease;
+}
+
+.menu-item button:hover {
+  background: var(--AccentColor);
+  color: white;
+  transform: none;
+}
+
+/* Bouton Supprimer (commun aux dossiers ET fichiers) */
+.menu-item button.danger,
+.menu-item:has(button[type="submit"]:only-child) button:last-child {
+  color: var(--DangerColor);
+  border: 1px solid var(--DangerColor);
+  background-color: transparent;
+  margin-top: 4px;
+}
+
+.menu-item button.danger:hover {
+  background-color: var(--DangerColor);
+  color: white;
+}
+
+/* Classe utilitaire danger */
+.danger {
+  color: var(--DangerColor);
+  border: 1px solid var(--DangerColor);
+}
+
+/* ============= MENU ADD ============= */
+.menuadd__main {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  z-index: 100;
+}
+
+.menuadd__button {
+  border: none;
+  background-color: var(--AccentColor);
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: var(--ShadowMedium);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--TransitionSpeed) ease;
+}
+
+.menuadd__button:hover {
+  background-color: var(--AccentColorHover);
+  transform: scale(1.1) translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+}
+
+.menuadd__button svg {
+  fill: white;
+  width: 32px;
+  height: 32px;
+}
+
+.menuadd__details {
+  display: flex;
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 12px);
+  flex-direction: column;
+  min-width: 280px;
+  gap: 8px;
+  background: var(--CardBackground);
+  border: 1px solid var(--BorderColor);
+  border-radius: var(--BorderRadius);
+  box-shadow: var(--ShadowMedium);
+  z-index: 1000;
+  padding: 16px;
+}
+
+.menuadd__details.hidden {
+  display: none;
+}
+
+/* Inputs dans menu Add (spécifique) */
+.menuadd__details .menu-item {
+  width: 100%;
+  padding: 12px;
+  position: relative;
+  border: 1px solid var(--BorderColor);
+  border-radius: 8px;
+  background: var(--CardBackground);
+}
+
+.menuadd__details .menu-item:hover {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: var(--AccentColor);
+}
+
+.menuadd__details .menu-item input[type="text"],
+.menuadd__details .menu-item input[type="file"] {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--BorderColor);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  background: white;
+}
+
+.menuadd__details .menu-item button {
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--AccentColor);
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.menuadd__details .menu-item button:hover {
+  background: var(--AccentColorHover);
+  transform: translateY(-1px);
+}
+
+@media screen and (max-width: 768px) {
+  .containeurMain {
+    justify-content: flex-start;
+    height: 100%;
+    padding: 20px;
+
+    h1 {
+      text-align: center;
+      font-size: 1.8rem;
+    }
+
+    .acceuil {
+      flex-direction: column;
+      margin-top: 20px;
+      gap: 2rem;
+
+      section {
+        width: 100%;
+      }
+    }
+  }
+
+  .containeurRegister {
+    .register {
+      width: 90%;
+      padding: 24px;
+    }
+  }
+
+  .containeurCardFolder {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+
+  .menuadd__main {
+    bottom: 20px;
+    right: 20px;
+  }
+
+  .menuadd__button {
+    width: 56px;
+    height: 56px;
+  }
 }

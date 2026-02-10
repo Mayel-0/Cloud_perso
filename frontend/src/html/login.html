@@ -1,19 +1,30 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login du Cloud</title>
+  <link rel="stylesheet" href="/css/styles.css?v=1.5">
+  <title>Pi_Cloud - Connexion</title>
 </head>
 <body>
-  <main>
-    <h1>Login</h1>
-    <form action="/login" method="post" class="login">
-      <label>Email d'utilisateur</label>
-      <input type="text" id="email" name="email" required/>
-      <label>Mot de passe</label>
-      <input type="password" id="password" name="password" required/>
-      <button type="submit">connecter</button>
+  <main class="containeurRegister">
+    <h1>🔑 Connexion</h1>
+    <form action="/login" method="post" class="register">
+      <label for="email">Adresse email</label>
+      <input type="email" id="email" name="email" placeholder="votre@email.com" required/>
+
+      <label for="password">Mot de passe</label>
+      <input type="password" id="password" name="password" placeholder="••••••••" required/>
+
+      <button type="submit">Se connecter</button>
+
+      {{if .CodeVerify}}
+        <p class="ErrorMsg">{{.CodeVerify}}</p>
+      {{end}}
+
+      <p style="text-align: center; margin-top: 20px;">
+        Pas encore de compte ? <a href="/register" style="color: var(--AccentColor); font-weight: 600;">Créer un compte</a>
+      </p>
     </form>
   </main>
 </body>

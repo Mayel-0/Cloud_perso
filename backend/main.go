@@ -68,6 +68,9 @@ type PageData struct {
 	ErrorFolderID   int
 	MoveType        string // "file" ou "folder"
 	MoveID          int
+
+	Users_id   int
+	CodeVerify string
 }
 
 type Crumbs struct {
@@ -132,6 +135,8 @@ func parseTemplates() (*template.Template, error) {
 		"../frontend/src/html/cloud_move.html",
 		"../frontend/src/svg/folder.html",
 		"../frontend/src/svg/file.html",
+		"../frontend/src/svg/menu.html",
+		"../frontend/src/svg/add.html",
 	)
 	if err != nil {
 		println("ERREUR func PARSETEMPLATES")
@@ -1461,9 +1466,13 @@ func RootFolderupload(UserId int, RootId int, virtualPath string, TimeNow time.T
 // handlefunc
 
 func loginhandle(w http.ResponseWriter, r *http.Request) {
+	data := PageData{}
 	switch r.Method {
 	case http.MethodGet:
-		if err = tpl.ExecuteTemplate(w, "login.html", nil); err != nil {
+		if msgerror := r.URL.Query().Get("error"); msgerror != "" {
+			data.CodeVerify = "Mots de passe ou email incorrect"
+		}
+		if err = tpl.ExecuteTemplate(w, "login.html", data); err != nil {
 			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
 			return
 		}
@@ -1481,7 +1490,7 @@ func loginhandle(w http.ResponseWriter, r *http.Request) {
 		defer rows.Close()
 
 		if rows.Next() == false {
-			http.Error(w, "Mots de passe ou email incorrect", http.StatusUnauthorized)
+			http.Redirect(w, r, "/login?error=code", http.StatusSeeOther)
 			return
 		} else {
 			//var emaildb strin
@@ -1492,7 +1501,7 @@ func loginhandle(w http.ResponseWriter, r *http.Request) {
 		//fmt.Println(User_id)
 
 		if err := bcrypt.CompareHashAndPassword([]byte(MDPdp), []byte(password)); err != nil {
-			http.Error(w, "Mots de passe ou email incorrect", http.StatusUnauthorized)
+			http.Redirect(w, r, "/login?error=code", http.StatusSeeOther)
 			return
 		}
 
@@ -1526,19 +1535,28 @@ func loginhandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func verifyhandle(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
 		User_id_str := r.URL.Query().Get("Users_id")
 		userid, err := strconv.Atoi(User_id_str)
 		if err != nil || userid <= 0 {
 			http.Error(w, "err de convertion string", http.StatusBadRequest)
 			return
 		}
-		err = tpl.ExecuteTemplate(w, "verify.html", userid)
-		if err != nil {
-			http.Error(w, "Erreur de chargement login.html", http.StatusInternalServerError)
+
+		data := PageData{Users_id: userid}
+
+		if msgerror := r.URL.Query().Get("error"); msgerror != "" {
+			data.CodeVerify = "Code invalide ou expiré"
 		}
-	}
-	if r.Method == http.MethodPost {
+
+		if err := tpl.ExecuteTemplate(w, "verify.html", data); err != nil {
+			http.Error(w, "Erreur de chargement verify.html", http.StatusInternalServerError)
+			return
+		}
+		return
+
+	case http.MethodPost:
 		code := r.FormValue("code")
 		User_id := r.FormValue("Users_id")
 		User_id_int, err := strconv.Atoi(User_id)
@@ -1551,24 +1569,24 @@ func verifyhandle(w http.ResponseWriter, r *http.Request) {
 		var verify_expires_at time.Time
 		var is_verified int
 
-		err = db.QueryRow("SELECT verify_token, verify_expires_at, is_verified FROM email_verification WHERE users_id = ? ORDER BY id DESC LIMIT 1", User_id).Scan(&verify_token, &verify_expires_at, &is_verified)
-		if err != nil {
-			http.Error(w, "ERREUR de select db", http.StatusInternalServerError)
-			return
-		}
-		if is_verified != 0 || time.Now().After(verify_expires_at) || code != verify_token {
-			http.Error(w, "Code invalide ou expiré", http.StatusUnauthorized)
-			tpl.ExecuteTemplate(w, "verify.html", nil)
+		err = db.QueryRow(
+			"SELECT verify_token, verify_expires_at, is_verified FROM email_verification WHERE users_id = ? ORDER BY id DESC LIMIT 1",
+			User_id_int,
+		).Scan(&verify_token, &verify_expires_at, &is_verified)
+		if err != nil || is_verified != 0 || time.Now().After(verify_expires_at) || code != verify_token {
+			http.Redirect(w, r, "/verify?Users_id="+User_id+"&error=code", http.StatusSeeOther)
 			return
 		}
 
-		_, err = db.Exec("UPDATE email_verification SET is_verified = 1 WHERE verify_token = ? AND users_id = ?", verify_token, User_id)
+		_, err = db.Exec(
+			"UPDATE email_verification SET is_verified = 1 WHERE verify_token = ? AND users_id = ?",
+			verify_token, User_id_int,
+		)
 		if err != nil {
 			http.Error(w, "SERVEUR ERREUR", http.StatusInternalServerError)
 			return
 		}
 
-		// we use the "github.com/google/uuid" library to generate UUIDs
 		sessionToken := uuid.NewString()
 		expiresAt := time.Now().Add(8 * time.Hour)
 
@@ -1583,6 +1601,10 @@ func verifyhandle(w http.ResponseWriter, r *http.Request) {
 			Expires: expiresAt,
 		})
 		http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
+		return
+
+	default:
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
 }
@@ -1602,12 +1624,23 @@ func acceuilHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func registerhandle(w http.ResponseWriter, r *http.Request) {
+	data := PageData{}
 	switch r.Method {
 	case http.MethodGet:
-		if err = tpl.ExecuteTemplate(w, "register.html", nil); err != nil {
+		msgerror := r.URL.Query().Get("error")
+		switch msgerror {
+		case "password":
+			data.CodeVerify = "Mots de passes non indentique"
+		case "email":
+			data.CodeVerify = "email déja utiliser"
+		default:
+			data.CodeVerify = ""
+		}
+		if err = tpl.ExecuteTemplate(w, "register.html", data); err != nil {
 			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
 			return
 		}
+
 	case http.MethodPost:
 		email := r.FormValue("email")
 		name := r.FormValue("name")
@@ -1615,8 +1648,27 @@ func registerhandle(w http.ResponseWriter, r *http.Request) {
 		passwordV := r.FormValue("passwordV")
 
 		if password != passwordV {
-			http.Redirect(w, r, "/register?error=pass", http.StatusSeeOther)
+			http.Redirect(w, r, "/register?error=password", http.StatusSeeOther)
 			return
+		}
+
+		rowsUsers, err := db.Query("SELECT email FROM users")
+		if err != nil {
+			http.Error(w, "erreur dans le email select", http.StatusInternalServerError)
+			return
+		}
+
+		defer rowsUsers.Close()
+
+		for rowsUsers.Next() {
+			var emailverif string
+			rowsUsers.Scan(&emailverif)
+			if emailverif != email {
+				continue
+			} else {
+				http.Redirect(w, r, "/register?error=email", http.StatusSeeOther)
+				return
+			}
 		}
 
 		hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -1898,6 +1950,18 @@ func moveHandle(w http.ResponseWriter, r *http.Request) {
 			MoveID:          moveID,
 		}
 
+		msgerror := r.URL.Query().Get("error")
+		switch msgerror {
+		case "1":
+			data.ErrorMsg = "Impossible de déplacer un dossier dans un dossier qui ne vous appartient pas"
+		case "2":
+			data.ErrorMsg = "Impossible de déplacer un dossier dans lui-même"
+		case "3":
+			data.ErrorMsg = "Impossible de déplacer un dossier dans un de ses sous-dossiers"
+		default:
+			data.ErrorMsg = ""
+		}
+
 		if err = tpl.ExecuteTemplate(w, "cloud_move.html", data); err != nil {
 			http.Error(w, "ERREUR de template", http.StatusInternalServerError)
 			return
@@ -1920,8 +1984,21 @@ func moveHandle(w http.ResponseWriter, r *http.Request) {
 		if err != nil { /* handle */
 		}
 
+		var ListFolderid []int
+		if ListFolderid, err = ListAllFolderByUsersId(Users_id); err != nil {
+			http.Error(w, "erreur de function list", http.StatusBadRequest)
+			return
+		}
+
+		for _, id := range ListFolderid {
+			if id != destID {
+				http.Redirect(w, r, "/cloud/replace/?error=1", http.StatusSeeOther)
+				return
+			}
+		}
+
 		if moveType == "folder" && id == destID {
-			http.Error(w, "Impossible de déplacer un dossier dans lui-même", http.StatusBadRequest)
+			http.Redirect(w, r, "/cloud/replace/?error=2", http.StatusSeeOther)
 			return
 		}
 
@@ -1932,7 +2009,7 @@ func moveHandle(w http.ResponseWriter, r *http.Request) {
 
 			for _, d := range descendants {
 				if d == destID {
-					http.Error(w, "Impossible de déplacer un dossier dans un de ses sous-dossiers", http.StatusBadRequest)
+					http.Redirect(w, r, "/cloud/replace/?error=3", http.StatusSeeOther)
 					return
 				}
 			}
@@ -1966,6 +2043,24 @@ func moveHandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func ListAllFolderByUsersId(User_id int) ([]int, error) {
+	var Listid []int
+	rows, err := db.Query("SELECT id FROM folders WHERE users_id = ?", &User_id)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int
+		rows.Scan(&id)
+
+		Listid = append(Listid, id)
+	}
+	return Listid, nil
+}
+
 // main
 func main() {
 	// chargement .env
@@ -1988,6 +2083,8 @@ func main() {
 	defer db.Close()
 
 	// router web
+	http.Handle("/css/", http.StripPrefix("/css/", http.FileServer(http.Dir("../frontend/src/css"))))
+	http.Handle("/fonts/", http.StripPrefix("/fonts/", http.FileServer(http.Dir("../frontend/src/fonts"))))
 	http.HandleFunc("/", acceuilHandle)
 	http.HandleFunc("/login", loginhandle)
 	http.HandleFunc("/register", registerhandle)

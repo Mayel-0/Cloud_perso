@@ -3,41 +3,167 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>acceuil || login ou register</title>
+  <link rel="stylesheet" href="/css/styles.css?v=1.5">
+  <title>Pi_Cloud</title>
 </head>
 <body>
-  <h1>Bienvenue sur le Cloud</h1>
+  <div class="page-header">
+    <h1>☁️ Bienvenue sur le Cloud</h1>
+  </div>
 
-  <label for="avatar">Choose a profile picture:</label>
+  <div class="breadcrumbs">
+    <span>📁</span>
+    {{range .Crumb}}
+      <a href="/cloud/acceuil/?folder_id={{.Id}}">{{.Name}}</a>
+      <label>/</label>
+    {{end}}
+  </div>
 
-  <form action="/upload" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" required />
-    <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
-    <button type="submit">Upload this file</button>
-  </form>
+  <div class="containeurCardFolder">
+    {{range .Folders}}
+      <div class="cardFolder">
+        <div class="cardFolder__Top">
+          <div class="cardFolder__Top__left">
+            <form action="/cloud/acceuil/" method="get">
+              {{template "FolderLogo"}}
+              <input type="hidden" name="folder_id" value="{{.Id}}">
+              <button type="submit"> <h1>/{{.Nom}}</h1> </button>
+            </form>
+          </div>
+          <div class="menufolder__main">
+            <button class="menufolder__button">•••</button>
+            <div class="menufolder__details hidden">
+              <form action="/renamefolder" method="post" class="menu-item">
+                <input type="text" name="newname" id="newname" placeholder="Renommer">
+                <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
+                <input type="hidden" name="folder_id" value="{{.Id}}">
+                <button type="submit">✏️ Renommer</button>
+              </form>
 
-  <form id="form-id" action="/uploadfolder" method="post" enctype="multipart/form-data">
-    <input type="text" name="cloud_folder_name" placeholder="Nom du dossier">
-    <input type="file" name="files" id="files" webkitdirectory multiple required>
-    <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
-    <button type="submit">Upload ce dossier</button>
-  </form>
+              <form action="/downloadfolder" method="post" class="menu-item">
+                <input type="hidden" name="folder_id" value="{{.Id}}">
+                <input type="hidden" name="folder_namestr" value="{{.Nom}}">
+                <button type="submit">⬇️ Télécharger</button>
+              </form>
+
+              <form action="/cloud/replace/" method="get" class="menu-item">
+                <input type="hidden" name="type" value="folder">
+                <input type="hidden" name="id" value="{{.Id}}">
+                <button type="submit">📂 Déplacer</button>
+              </form>
+
+              <form action="/deletefolder" method="post" class="menu-item">
+                <input type="hidden" name="folder_id" value="{{.Id}}">
+                <button type="submit" class="danger">🗑️ Supprimer</button>
+              </form>
+            </div>
+          </div>
+        {{if and $.ErrorMsg (eq $.ErrorFolderID .Id)}}
+          <p>{{$.ErrorMsg}}</p>
+        {{end}}
+        </div>
+      </div>
+    {{end}}
+
+    {{range .Files}}
+      <div class="cardFolder cardFile">
+        <div class="cardFolder__Top">
+          <div class="cardFolder__Top__left">
+            {{template "FileLogo"}}
+            <h1>/{{.OriginalName}}</h1>
+          </div>
+
+          <div class="menufile__main">
+            <button type="button" class="menufile__button">•••</button>
+            <div class="menufile__details hidden">
+
+              <form action="/renamefile" method="post" class="menu-item">
+                <input type="hidden" name="file_id" value="{{.ID}}">
+                <input type="text" name="newname" placeholder="Renommer">
+                <input type="hidden" name="currentfolderid" value="{{$.CurrentFolderID}}">
+                <button type="submit">✏️ Renommer</button>
+              </form>
+
+              <form action="/downloadfile" method="post" class="menu-item">
+                <input type="hidden" name="file_id" value="{{.ID}}"/>
+                <button type="submit">⬇️ Télécharger</button>
+              </form>
+
+              <form action="/cloud/replace/" method="get" class="menu-item">
+                <input type="hidden" name="type" value="file">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <button type="submit">📂 Déplacer</button>
+              </form>
+
+              <form action="/deletefile" method="post" class="menu-item">
+                <input type="hidden" name="file_id" value="{{.ID}}">
+                <input type="hidden" name="Users_id" value="{{.}}">
+                <button type="submit" class="danger">🗑️ Supprimer</button>
+              </form>
+
+            </div>
+          </div>
+        </div>
+
+        {{if and $.ErrorMsg (eq $.ErrorFileID .ID)}}
+          <p>{{$.ErrorMsg}}</p>
+        {{end}}
+      </div>
+    {{end}}
+  </div>
+
+  <div class="action-bar">
+    <a href="/cloud/corbeille/">
+      <button class="btn-secondary">🗑️ Corbeille</button>
+    </a>
+  </div>
+
+  <!-- Bouton Add principal (FAB) -->
+  <div class="menuadd__main">
+    <button type="button" class="menuadd__button">
+      {{template "Add"}}
+    </button>
+
+    <div class="menuadd__details hidden">
+      <!-- Upload fichier unique -->
+      <form action="/upload" method="post" class="menu-item" enctype="multipart/form-data">
+        <input type="file" name="file" required />
+        <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
+        <button type="submit">📄 Fichier unique</button>
+      </form>
+
+      <!-- Upload dossier complet -->
+      <form action="/uploadfolder" method="post" class="menu-item" enctype="multipart/form-data">
+        <input type="text" name="cloud_folder_name" placeholder="Nom du dossier">
+        <input type="file" name="files" id="files" webkitdirectory multiple required>
+        <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
+        <button type="submit">📁 Dossier complet</button>
+      </form>
+
+      <!-- Créer dossier vide -->
+      <form action="/createfolder" method="post" class="menu-item">
+        <input type="text" name="name" placeholder="Nom du dossier">
+        <input type="hidden" name="Users_id" value="{{.}}">
+        <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
+        <button type="submit">📂 Dossier vide</button>
+      </form>
+    </div>
+  </div>
+
   <script>
-    const input = document.getElementById("files");
-    const form  = document.getElementById("form-id");
+  // ====== SCRIPT POUR UPLOAD DOSSIER ======
+  const folderForm = document.querySelector('form[action="/uploadfolder"]');
+  const folderInput = document.getElementById("files");
 
-    form.addEventListener("submit", (e) => {
+  if (folderForm && folderInput) {
+    folderForm.addEventListener("submit", (e) => {
       e.preventDefault();
-
-      const data = new FormData(form);
-
-      // vider d’abord les fichiers ajoutés automatiquement par le form (optionnel)
-      // puis les ré‑ajouter proprement avec leurs paths
+      const data = new FormData(folderForm);
       data.delete("files");
 
-      Array.from(input.files).forEach((file) => {
-        data.append("files", file);                     // le fichier
-        data.append("paths", file.webkitRelativePath);  // son chemin virtuel
+      Array.from(folderInput.files).forEach((file) => {
+        data.append("files", file);
+        data.append("paths", file.webkitRelativePath);
         console.log('name:', file.name, 'relative:', file.webkitRelativePath);
       });
 
@@ -45,90 +171,103 @@
         method: "POST",
         body: data,
       }).then(() => {
-        // éventuellement, reload/redirection côté front
+        location.reload();
       });
     });
+  }
+
+  // ====== GESTION DES MENUS ======
+  document.addEventListener('DOMContentLoaded', function() {
+    // ====== MENUS DOSSIERS ======
+    document.querySelectorAll('.cardFolder').forEach(card => {
+      const button = card.querySelector('.menufolder__button');
+      const details = card.querySelector('.menufolder__details');
+
+      if (button && details) {
+        button.addEventListener('click', function(e) {
+          e.stopPropagation();
+          e.preventDefault();
+
+          // Ferme tous les autres menus dossiers
+          document.querySelectorAll('.menufolder__details').forEach(other => {
+            if (other !== details) {
+              other.classList.add('hidden');
+            }
+          });
+
+          // Ferme tous les menus fichiers
+          document.querySelectorAll('.menufile__details').forEach(other => {
+            other.classList.add('hidden');
+          });
+
+          // Ferme menu Add
+          document.querySelector('.menuadd__details')?.classList.add('hidden');
+
+          details.classList.toggle('hidden');
+        });
+      }
+    });
+
+    // ====== MENUS FICHIERS ======
+    document.querySelectorAll('.cardFile').forEach(card => {
+      const button = card.querySelector('.menufile__button');
+      const details = card.querySelector('.menufile__details');
+
+      if (button && details) {
+        button.addEventListener('click', function(e) {
+          e.stopPropagation();
+          e.preventDefault();
+
+          // Ferme tous les autres menus fichiers
+          document.querySelectorAll('.menufile__details').forEach(other => {
+            if (other !== details) {
+              other.classList.add('hidden');
+            }
+          });
+
+          // Ferme tous les menus dossiers
+          document.querySelectorAll('.menufolder__details').forEach(other => {
+            other.classList.add('hidden');
+          });
+
+          // Ferme menu Add
+          document.querySelector('.menuadd__details')?.classList.add('hidden');
+
+          details.classList.toggle('hidden');
+        });
+      }
+    });
+
+    // ====== MENU ADD ======
+    const addButton = document.querySelector('.menuadd__button');
+    const addDetails = document.querySelector('.menuadd__details');
+
+    if (addButton && addDetails) {
+      addButton.addEventListener('click', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+
+        // Ferme TOUS les autres menus
+        document.querySelectorAll('.menufolder__details, .menufile__details').forEach(menu => {
+          menu.classList.add('hidden');
+        });
+
+        // Toggle menu Add
+        addDetails.classList.toggle('hidden');
+      });
+    }
+
+    // Ferme tout si clic en dehors
+    document.addEventListener('click', function(e) {
+      const clickInAnyMenu = e.target.closest('.menufolder__main, .menufile__main, .menuadd__main');
+
+      if (!clickInAnyMenu) {
+        document.querySelectorAll('.menufolder__details, .menufile__details, .menuadd__details').forEach(details => {
+          details.classList.add('hidden');
+        });
+      }
+    });
+  });
   </script>
-
-  <form action="/createfolder" method="post">
-    <label>Nom du dossier</label>
-    <input type="text" id="name" name="name">
-    <input type="submit" value="Upload this file" />
-    <input type="hidden" name="Users_id" value="{{.}}">
-    <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
-  </form>
-
-  <h2>route</h2>
-  {{range .Crumb}}
-    <a href="/cloud/acceuil/?folder_id={{.Id}}">{{.Name}}</a>
-    <label>/</label>
-  {{end}}
-
-  {{range .Folders}}
-    <h1>{{.Nom}}</h1>
-    {{template "FolderLogo"}}
-    <form action="/deletefolder" method="post">
-      <input type="hidden" name="folder_id" value="{{.Id}}">
-      <button type="submit">Supprimer</button>
-    </form>
-    <form action="/cloud/acceuil/" method="get">
-      <input type="hidden" name="folder_id" value="{{.Id}}">
-      <button type="submit">Ouvrir</button>
-    </form>
-
-    <form action="/renamefolder" method="post">
-      <input type="text" name="newname" id="newname" placeholder="{{.Nom}}">
-      <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
-      <input type="hidden" name="folder_id" value="{{.Id}}">
-    </form>
-
-    <form action="/downloadfolder" method="post">
-      <input type="hidden" name="folder_id" value="{{.Id}}">
-      <input type="hidden" name="folder_namestr" value="{{.Nom}}">
-      <button type="submit">download</button>
-    </form>
-
-    <form action="/cloud/replace/" method="get">
-      <input type="hidden" name="type" value="folder">
-      <input type="hidden" name="id" value="{{.Id}}">
-      <button type="submit">Move</button>
-    </form>
-    {{if and $.ErrorMsg (eq $.ErrorFolderID .Id)}}
-      <p>{{$.ErrorMsg}}</p>
-    {{end}}
-  {{end}}
-
-  {{range .Files}}
-    <h1>{{.OriginalName}}</h1>
-    {{template "FileLogo"}}
-    <form action="/deletefile" method="post">
-      <input type="hidden" name="file_id" value="{{.ID}}">
-      <input type="hidden" name="Users_id" value="{{.}}">
-      <button type="submit">Supprimer</button>
-    </form>
-    <form action="/downloadfile" method="post">
-      <input type="hidden" name="file_id" value="{{.ID}}"/>
-      <button type="submit">downloadfile</button>
-    </form>
-    <form action="/renamefile" method="post">
-      <input type="hidden" name="file_id" value="{{.ID}}">
-      <input type="text" name="newname" id="newname" placeholder="{{.OriginalName}}">
-      <input type="hidden" name="currentfolderid" id="currentfolderid" value="{{$.CurrentFolderID}}">
-    </form>
-
-    <form action="/cloud/replace/" method="get">
-      <input type="hidden" name="type" value="file">
-      <input type="hidden" name="id" value="{{.ID}}">
-      <button type="submit">move</button>
-    </form>
-    {{if and $.ErrorMsg (eq $.ErrorFileID .ID)}}
-      <p>{{$.ErrorMsg}}</p>
-    {{end}}
-  {{end}}
-
-
-  <a href="/cloud/corbeille/">
-    <button>corbeille</button>
-  </a>
 </body>
 </html>
