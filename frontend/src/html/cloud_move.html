@@ -1,40 +1,64 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="/css/styles.css">
-  <title>Pi_Cloud</title>
+  <link rel="stylesheet" href="/css/styles.css?v=1.5">
+  <title>Pi_Cloud - Déplacer</title>
 </head>
 <body>
-  <h1>Bienvenue sur le Cloud ||replace</h1>
+  <div class="page-header">
+    <h1>📂 Déplacer vers...</h1>
+    <p style="text-align: center; color: var(--TextColor); opacity: 0.8;">Choisissez la destination</p>
+  </div>
 
-  <h2>route</h2>
-  {{range .Crumb}}
-    <a href="/cloud/replace/?folder_id={{.Id}}&type={{$.MoveType}}&id={{$.MoveID}}">{{.Name}}</a>
-    <label>/</label>
-  {{end}}
-
-  {{range .Folders}}
-    <h1>{{.Nom}}</h1>
-    <li>
-      <a href="/cloud/replace/?folder_id={{.Id}}&type={{$.MoveType}}&id={{$.MoveID}}">{{.Nom}}</a>
-    </li>
-  {{end}}
-
-  <form action="/cloud/replace/" method="post">
-    <input type="hidden" name="type" value="{{.MoveType}}">
-    <input type="hidden" name="id" value="{{.MoveID}}">
-    <input type="hidden" name="destination_folder_id" value="{{.CurrentFolderID}}">
-    <button type="submit">Déplacer ici</button>
-    {{if .ErrorMsg}}
-      <p class="ErrorMsg">{{.ErrorMsg}}</p>
+  <div class="breadcrumbs">
+    <span>📁</span>
+    {{range .Crumb}}
+      <a href="/cloud/replace/?folder_id={{.Id}}&type={{$.MoveType}}&id={{$.MoveID}}">{{.Name}}</a>
+      <label>/</label>
     {{end}}
-  </form>
+  </div>
 
-  {{range .Files}}
-    <h1>{{.OriginalName}}</h1>
-  {{end}}
+  <div class="move-container">
+    <div class="move-action">
+      <form action="/cloud/replace/" method="post">
+        <input type="hidden" name="type" value="{{.MoveType}}">
+        <input type="hidden" name="id" value="{{.MoveID}}">
+        <input type="hidden" name="destination_folder_id" value="{{.CurrentFolderID}}">
+        <button type="submit" class="btn-primary btn-large">✓ Déplacer ici</button>
+        {{if .ErrorMsg}}
+          <p class="ErrorMsg">{{.ErrorMsg}}</p>
+        {{end}}
+      </form>
+    </div>
 
+    <div class="folder-list">
+      {{range .Folders}}
+        <a href="/cloud/replace/?folder_id={{.Id}}&type={{$.MoveType}}&id={{$.MoveID}}" class="folder-item">
+          <span class="folder-icon">📁</span>
+          <span class="folder-name">{{.Nom}}</span>
+          <span class="folder-arrow">→</span>
+        </a>
+      {{end}}
+    </div>
+
+    {{if .Files}}
+      <div class="files-preview">
+        <h3>📄 Fichiers dans ce dossier</h3>
+        <div class="file-list">
+          {{range .Files}}
+            <div class="file-preview-item">{{.OriginalName}}</div>
+          {{end}}
+        </div>
+      </div>
+    {{end}}
+  </div>
+
+  <div class="action-bar">
+    <a href="/cloud/acceuil/">
+      <button class="btn-secondary">← Annuler</button>
+    </a>
+  </div>
 </body>
 </html>

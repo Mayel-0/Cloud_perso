@@ -1,18 +1,32 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="/css/styles.css">
-  <title>Pi_Cloud</title>
+  <link rel="stylesheet" href="/css/styles.css?v=1.5">
+  <title>Pi_Cloud - Vider la corbeille</title>
 </head>
 <body>
-  <main>
-    <h1>delete ALL</h1>
-    <form method="post" action="/harddeleteall">
-      <label for="password">here :</label>
-      <input type="password" id="password" name="password" required/>
-    </form>
+  <main class="containeurRegister">
+    <div class="danger-zone">
+      <h1>⚠️ Vider la corbeille</h1>
+      <div class="warning-box">
+        <p><strong>ATTENTION :</strong> Cette action est irréversible !</p>
+        <p>Tous les fichiers et dossiers de la corbeille seront définitivement supprimés.</p>
+      </div>
+      
+      <form method="post" action="/harddeleteall" class="register">
+        <label for="password">Confirmez avec votre mot de passe :</label>
+        <input type="password" id="password" name="password" placeholder="Entrez votre mot de passe" required/>
+        <button type="submit" class="btn-danger">🗑️ Vider définitivement la corbeille</button>
+      </form>
+      
+      <div class="action-bar" style="margin-top: 30px;">
+        <a href="/cloud/corbeille/">
+          <button class="btn-secondary">← Retour à la corbeille</button>
+        </a>
+      </div>
+    </div>
   </main>
 </body>
 </html>

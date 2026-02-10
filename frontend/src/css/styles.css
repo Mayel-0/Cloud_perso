@@ -734,3 +734,182 @@ section a button:hover {
     height: 56px;
   }
 }
+
+/* ============= PAGE DÉPLACER (MOVE) ============= */
+.move-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.move-action {
+  background: var(--CardBackground);
+  border: 2px solid var(--AccentColor);
+  border-radius: var(--BorderRadius);
+  padding: 24px;
+  margin-bottom: 30px;
+  text-align: center;
+  box-shadow: var(--ShadowMedium);
+}
+
+.move-action form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-large {
+  padding: 16px 48px;
+  font-size: 18px;
+}
+
+.folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 30px;
+}
+
+.folder-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--CardBackground);
+  border: 1px solid var(--BorderColor);
+  border-radius: var(--BorderRadius);
+  text-decoration: none;
+  color: var(--TextColor);
+  transition: all var(--TransitionSpeed) ease;
+  box-shadow: var(--ShadowLight);
+}
+
+.folder-item:hover {
+  border-color: var(--AccentColor);
+  box-shadow: var(--ShadowMedium);
+  transform: translateX(8px);
+}
+
+.folder-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.folder-name {
+  flex: 1;
+  font-weight: 500;
+  font-size: 16px;
+}
+
+.folder-arrow {
+  color: var(--AccentColor);
+  font-size: 20px;
+  opacity: 0;
+  transition: opacity var(--TransitionSpeed) ease;
+}
+
+.folder-item:hover .folder-arrow {
+  opacity: 1;
+}
+
+.files-preview {
+  background: var(--CardBackground);
+  border: 1px solid var(--BorderColor);
+  border-radius: var(--BorderRadius);
+  padding: 20px;
+  margin-top: 30px;
+}
+
+.files-preview h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.1rem;
+  color: var(--TextColor);
+}
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-preview-item {
+  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--TextColor);
+  opacity: 0.7;
+}
+
+/* ============= PAGE DANGER ZONE (DELETE ALL) ============= */
+.danger-zone {
+  width: 100%;
+  max-width: 500px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.danger-zone h1 {
+  color: var(--DangerColor);
+  margin-bottom: 24px;
+}
+
+.warning-box {
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: var(--BorderRadius);
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.warning-box p {
+  margin: 8px 0;
+  color: #856404;
+  line-height: 1.6;
+}
+
+.warning-box strong {
+  color: var(--DangerColor);
+  font-size: 1.1em;
+}
+
+.danger-zone .register {
+  background: var(--CardBackground);
+  border: 2px solid var(--DangerColor);
+}
+
+.danger-zone .btn-danger {
+  width: 100%;
+}
+
+/* ============= RESPONSIVE POUR MOVE & DANGER ============= */
+@media screen and (max-width: 768px) {
+  .move-container {
+    padding: 12px;
+  }
+
+  .folder-item {
+    padding: 12px 16px;
+  }
+
+  .folder-item:hover {
+    transform: translateX(4px);
+  }
+
+  .btn-large {
+    padding: 14px 32px;
+    font-size: 16px;
+  }
+
+  .danger-zone {
+    width: 95%;
+  }
+
+  .warning-box {
+    padding: 16px;
+  }
+}
