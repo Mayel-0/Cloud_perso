@@ -1991,24 +1991,32 @@ func moveHandle(w http.ResponseWriter, r *http.Request) {
 		if err != nil { /* handle */
 		}
 		destID, err := strconv.Atoi(destStr)
-		if err != nil { /* handle */
+		if err != nil {
+			println(err)
 		}
 
 		var ListFolderid []int
+
 		if ListFolderid, err = ListAllFolderByUsersId(Users_id); err != nil {
 			http.Error(w, "erreur de function list", http.StatusBadRequest)
 			return
 		}
 
-		for _, id := range ListFolderid {
-			if id != destID {
-				http.Redirect(w, r, "/cloud/replace/?error=1", http.StatusSeeOther)
-				return
+		// Vérifier si la destination appartient à l'utilisateur
+		destBelongsToUser := false
+		for _, folderID := range ListFolderid {
+			if folderID == destID {
+				destBelongsToUser = true
+				break
 			}
+		}
+		if !destBelongsToUser {
+			http.Redirect(w, r, fmt.Sprintf("/cloud/replace/?type=%s&id=%d&error=1", moveType, id), http.StatusSeeOther)
+			return
 		}
 
 		if moveType == "folder" && id == destID {
-			http.Redirect(w, r, "/cloud/replace/?error=2", http.StatusSeeOther)
+			http.Redirect(w, r, fmt.Sprintf("/cloud/replace/?type=%s&id=%d&error=2", moveType, id), http.StatusSeeOther)
 			return
 		}
 
@@ -2019,7 +2027,7 @@ func moveHandle(w http.ResponseWriter, r *http.Request) {
 
 			for _, d := range descendants {
 				if d == destID {
-					http.Redirect(w, r, "/cloud/replace/?error=3", http.StatusSeeOther)
+					http.Redirect(w, r, fmt.Sprintf("/cloud/replace/?type=%s&id=%d&error=3", moveType, id), http.StatusSeeOther)
 					return
 				}
 			}
