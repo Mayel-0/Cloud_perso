@@ -912,4 +912,15 @@ section a button:hover {
   .warning-box {
     padding: 16px;
   }
+
+  .trash-item {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    .trash-item-actions {
+      justify-content: center;
+      align-items: center;
+    }
+  }
 }
