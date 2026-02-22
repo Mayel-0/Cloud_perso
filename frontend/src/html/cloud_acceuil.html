@@ -125,12 +125,12 @@
     </button>
 
     <div class="menuadd__details hidden">
-      <!-- Upload fichier unique -->
-      <form action="/upload" method="post" class="menu-item" enctype="multipart/form-data">
-        <input type="file" name="file" max="25" required />
+    <!-- Upload MULTIPLE (1 à 25 fichiers) - REMPLACE "Fichier unique" -->
+    <form action="/upload" method="post" class="menu-item" enctype="multipart/form-data">
+        <input type="file" name="files" multiple />
         <input type="hidden" name="folder_id" value="{{.CurrentFolderID}}">
-        <button type="submit">📄 Fichier unique</button>
-      </form>
+        <button type="submit">📄 Fichier (1-25 fichiers)</button>
+    </form>
 
       <!-- Upload dossier complet -->
       <form action="/uploadfolder" method="post" class="menu-item" enctype="multipart/form-data">
