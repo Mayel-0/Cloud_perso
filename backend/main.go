@@ -165,118 +165,129 @@ func connectDB() (*sql.DB, error) {
 func NewUUIDv4() string {
 	return uuid.NewString()
 }
-
 func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
+	// Parse multipart (50MB max)
+	r.ParseMultipartForm(50 << 20)
+
 	var folder_id int
 	var rootId int
-	Struuid := NewUUIDv4()
-	/*folder_idstr := r.URL.Query().Get("folder_id")
-	Users_idstr := r.URL.Query().Get("Users_id")
-	Users_id, err := strconv.Atoi(Users_idstr)
-	if err != nil {
-		http.Error(w, "convertion Users_id", http.StatusInternalServerError)
-		return
-	}*/
+
+	// SESSION CHECK
 	c, err := r.Cookie("session_token")
-	if err != nil { /* pas connecté */
+	if err != nil {
+		http.Error(w, "Pas connecté", http.StatusUnauthorized)
+		return
 	}
-
 	sess, ok := sessions[c.Value]
-	if !ok || time.Now().After(sess.expiry) { /* session invalide */
+	if !ok || time.Now().After(sess.expiry) {
+		http.Error(w, "Session invalide", http.StatusUnauthorized)
+		return
 	}
-
 	Users_id := sess.userid
 	Users_idstr := strconv.Itoa(Users_id)
 
+	// FOLDER ID
 	folder_idstr := r.FormValue("folder_id")
-	folder_id, err = strconv.Atoi(folder_idstr)
-	if err != nil {
-		http.Error(w, "convertion folder_id", http.StatusInternalServerError)
-		return
-	}
 	if folder_idstr != "" {
 		folder_id, err = strconv.Atoi(folder_idstr)
 		if err != nil {
-			http.Error(w, "convertion folder_id", http.StatusInternalServerError)
+			http.Error(w, "Conversion folder_id", http.StatusInternalServerError)
 			return
 		}
 	} else {
 		folder_id = 0
 	}
 
-	file, fileheader, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "ERREUR dans la recuperation du fichier", http.StatusInternalServerError)
+	// ✅ MULTIPLE FILES (name="files")
+	files := r.MultipartForm.File["files"]
+	if len(files) == 0 {
+		http.Error(w, "Aucun fichier sélectionné", http.StatusBadRequest)
+		return
+	}
+	if len(files) > 25 {
+		http.Error(w, "Maximum 25 fichiers autorisé", http.StatusBadRequest)
 		return
 	}
 
-	defer file.Close()
-
-	// Création du fichier vide
-
-	if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err == sql.ErrNoRows {
-		root := "../storage/" + Users_idstr + "/" + "root"
+	// ROOT FOLDER (création si absent)
+	if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", Users_id).Scan(&rootId); err == sql.ErrNoRows {
+		root := "../storage/" + Users_idstr + "/root"
 		if err = os.MkdirAll(root, 0755); err != nil {
-			http.Error(w, "ERREUR d'insert root", http.StatusInternalServerError)
+			http.Error(w, "ERREUR création root", http.StatusInternalServerError)
 			return
 		}
-		_, err = db.Exec("INSERT INTO folders (users_id, nom, parent_id) VALUES (?, 'root', NULL)", &Users_id)
+		_, err = db.Exec("INSERT INTO folders (users_id, nom, parent_id) VALUES (?, 'root', NULL)", Users_id)
 		if err != nil {
-			log.Fatal(err)
-			http.Error(w, "ERREUR d'insert root", http.StatusInternalServerError)
+			http.Error(w, "ERREUR insert root", http.StatusInternalServerError)
 			return
 		}
 	} else if err != nil {
-		http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
+		http.Error(w, "ERREUR QueryRow root", http.StatusInternalServerError)
 		return
 	}
 
-	if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", &Users_id).Scan(&rootId); err != nil {
-		log.Fatal(err)
-		http.Error(w, "ERREUR de QueryROW", http.StatusInternalServerError)
+	// Récupère rootId
+	if err = db.QueryRow("SELECT id FROM folders WHERE users_id = ? AND parent_id IS NULL AND nom = 'root'", Users_id).Scan(&rootId); err != nil {
+		http.Error(w, "ERREUR QueryRow root", http.StatusInternalServerError)
 		return
 	}
-
 	if folder_id == 0 {
 		folder_id = rootId
 	}
 
-	extension := filepath.Ext(fileheader.Filename)
+	// Crée dossier utilisateur
 	userDir := "../storage/" + Users_idstr
-	os.MkdirAll(userDir, 0755)
+	os.MkdirAll(userDir+"/root", 0755)
 
-	out, err := os.Create("../storage/" + Users_idstr + "/root/" + Struuid + extension)
-	if err != nil {
-		http.Error(w, "ERREUR dans la creation du fichier", http.StatusInternalServerError)
-		return
+	// ✅ BOUCLE MULTIPLE FICHIERS
+	successCount := 0
+	for _, fileHeader := range files {
+		file, err := fileHeader.Open()
+		if err != nil {
+			continue
+		}
+		defer file.Close()
+
+		// ✅ UUID UNIQUE PAR FICHIER (remplace Struuid)
+		fileUUID := NewUUIDv4()
+		extension := filepath.Ext(fileHeader.Filename)
+		outPath := "../storage/" + Users_idstr + "/root/" + fileUUID + extension
+
+		out, err := os.Create(outPath)
+		if err != nil {
+			continue
+		}
+		defer out.Close()
+
+		ExactSizeBytes, err := io.Copy(out, file)
+		if err != nil {
+			continue
+		}
+
+		// INSERT DB
+		f := File{
+			UsersID:      Users_id,
+			FolderID:     folder_id,
+			OriginalName: fileHeader.Filename,
+			StoredPath:   "storage/" + Users_idstr + "/root/" + fileUUID + extension,
+			MimeType:     fileHeader.Header.Get("content-type"),
+			SizeBytes:    ExactSizeBytes,
+			CreatedAt:    time.Now(),
+		}
+
+		_, err = db.Exec("INSERT INTO files (users_id,folder_id,original_name,stored_path,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?)",
+			f.UsersID, f.FolderID, f.OriginalName, f.StoredPath, f.MimeType, f.SizeBytes, f.CreatedAt)
+		if err == nil {
+			successCount++
+		}
 	}
 
-	defer out.Close()
-
-	// Copie du contenu dans le fichier précédement vide
-	ExactSizeBytes, err := io.Copy(out, file)
-	if err != nil {
-		http.Error(w, "ERREUR dans la copie du contenue", http.StatusInternalServerError)
-		return
-	}
-
-	f := File{
-		UsersID:      Users_id,
-		FolderID:     folder_id,
-		OriginalName: fileheader.Filename,
-		StoredPath:   "storage/" + Users_idstr + "/root/" + Struuid + extension,
-		MimeType:     fileheader.Header.Get("content-type"),
-		SizeBytes:    ExactSizeBytes,
-		CreatedAt:    time.Now(),
-	}
-
-	_, err = db.Exec("INSERT INTO files (users_id,folder_id,original_name,stored_path,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?)",
-		&f.UsersID, &f.FolderID, &f.OriginalName, &f.StoredPath, &f.MimeType, &f.SizeBytes, &f.CreatedAt)
-	if err != nil {
-		http.Error(w, "ERROR d'insert DB", http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, "/cloud/acceuil/", http.StatusSeeOther)
+	// Message succès
+	fmt.Fprintf(w, `
+        <script>
+            alert("%d/%d fichiers uploadés avec succès !");
+            window.location.href="/cloud/acceuil/";
+        </script>`, successCount, len(files))
 }
 
 func downloadhandle(w http.ResponseWriter, r *http.Request) {
