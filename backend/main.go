@@ -2,7 +2,6 @@ package main
 
 import (
 	"archive/zip"
-	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
@@ -1764,126 +1763,80 @@ func requireSession(w http.ResponseWriter, r *http.Request) (int, bool) {
 }
 
 func downloadFolder(w http.ResponseWriter, r *http.Request) {
-	var f []File
 	Users_id, ok := requireSession(w, r)
 	if r.Method != http.MethodPost {
 		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
 		return
 	}
-
 	if !ok {
-		return // redirigé vers /login
+		return
 	}
-	//Users_idstr := strconv.Itoa(Users_id)
 
 	Folder_idstr := r.FormValue("folder_id")
 	Folder_id, err := strconv.Atoi(Folder_idstr)
-
-	folder_namestr := r.FormValue("folder_namestr")
 	if err != nil {
 		http.Error(w, "erreur de convertion folder", http.StatusInternalServerError)
 		return
 	}
+
+	folder_namestr := r.FormValue("folder_namestr")
+
+	// Récupère tous les IDs des dossiers
 	ListId, err := collectFolderTreeIDs(Users_id, Folder_id)
 	if err != nil {
 		http.Error(w, "erreur de list d'id", http.StatusInternalServerError)
 		return
 	}
-	fmt.Print(ListId)
 
-	placeholder := make([]string, len(ListId))
-	for i := range placeholder {
-		placeholder[i] = "?"
-	}
-
-	inClause := strings.Join(placeholder, ",")
-
-	args := make([]interface{}, 0, len(ListId)+1)
-	args = append(args, Users_id)
-	for _, id := range ListId {
-		args = append(args, id)
-	}
-
-	query := "SELECT * FROM files WHERE deleted_at IS NULL AND users_id = ? AND folder_id IN(" + inClause + ")"
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		http.Error(w, "erreur de select", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var file File
-		rows.Scan(&file.ID, &file.UsersID, &file.FolderID, &file.OriginalName, &file.StoredPath, &file.MimeType, &file.SizeBytes, &file.CreatedAt, &file.DeletedAt)
-
-		f = append(f, file)
-	}
-
-	buf := &bytes.Buffer{}
-	zw := zip.NewWriter(buf)
-
-	if err = CreateZip(zw, ListId, f, Users_id); err != nil {
-		http.Error(w, "erreur createzip", http.StatusInternalServerError)
-		return
-	}
-
-	if err = zw.Close(); err != nil {
-		http.Error(w, "erreur dans la fermeture du zip", http.StatusInternalServerError)
-		return
-	}
-
-	// headers HTTP pour le téléchargement
+	// Headers ZIP IMMÉDIATS (avant traitement)
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+folder_namestr+`.zip"`)
-	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	w.Header().Set("Accept-Ranges", "bytes") // Resume downloads
 
-	if _, err := w.Write(buf.Bytes()); err != nil {
-		log.Println(err)
-	}
-}
+	// ✅ ZIP DIRECT SUR RESPONSE (0 RAM !)
+	zw := zip.NewWriter(w)
+	defer zw.Close()
 
-func CreateZip(zw *zip.Writer, ListId []int, file []File, User_id int) error {
-	for _, id := range ListId {
-		for _, currentfile := range file {
-			if currentfile.FolderID != id {
+	// Pour chaque sous-dossier, ajoute ses fichiers
+	for _, folderID := range ListId {
+		// Récupère fichiers du dossier
+		rows, err := db.Query("SELECT * FROM files WHERE deleted_at IS NULL AND users_id = ? AND folder_id = ?", Users_id, folderID)
+		if err != nil {
+			continue
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var file File
+			rows.Scan(&file.ID, &file.UsersID, &file.FolderID, &file.OriginalName, &file.StoredPath, &file.MimeType, &file.SizeBytes, &file.CreatedAt, &file.DeletedAt)
+
+			// Ouvre fichier disque → stream direct dans ZIP
+			filePath := "../" + file.StoredPath
+			srcFile, err := os.Open(filePath)
+			if err != nil {
 				continue
 			}
-			root, err := rootbreadcrumb(id, User_id)
+
+			// Chemin ZIP = nom original (pas UUID)
+			zipPath := file.OriginalName
+
+			// ✅ STREAM DIRECT (pas de buffer RAM)
+			zwf, err := zw.Create(zipPath)
 			if err != nil {
-				return err
+				srcFile.Close()
+				continue
 			}
 
-			parts := make([]string, 0, len(root)-1)
-
-			for i, namepart := range root {
-				if i == 0 {
-					continue
-				}
-				parts = append(parts, namepart.Name)
-			}
-			pathname := strings.Join(parts, "/")
-
-			zipPath := pathname + "/" + currentfile.OriginalName
-
-			fw, err := zw.Create(zipPath)
+			// Copie STREAM du disque → ZIP → client (0 RAM)
+			_, err = io.Copy(zwf, srcFile)
+			srcFile.Close()
 			if err != nil {
-				return err
+				continue
 			}
-
-			src, err := os.Open("../" + currentfile.StoredPath)
-			if err != nil {
-				return err
-			}
-
-			if _, err = io.Copy(fw, src); err != nil {
-				src.Close()
-				return err
-			}
-			src.Close()
 		}
 	}
-	return nil
+
+	// Flush automatique par defer zw.Close()
 }
 
 func moveHandle(w http.ResponseWriter, r *http.Request) {
