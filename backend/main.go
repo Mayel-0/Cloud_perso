@@ -1,17 +1,22 @@
 package main
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -79,7 +84,7 @@ type Crumbs struct {
 }
 
 // SendEmail envoie un email générique.
-func SendEmail(to, subject, body string) error {
+func SendEmail(to, subject, textBody, htmlBody string) error {
 	// Récupération de la config SMTP dans les variables d'environnement.
 	smtpHost := os.Getenv("SMTP_HOST")
 	smtpPortStr := os.Getenv("SMTP_PORT")
@@ -103,7 +108,15 @@ func SendEmail(to, subject, body string) error {
 	m.SetHeader("From", from)
 	m.SetHeader("To", to)
 	m.SetHeader("Subject", subject)
-	m.SetBody("text/plain", body)
+
+	// Texte simple (fallback)
+	if textBody != "" {
+		m.SetBody("text/plain", textBody)
+	}
+	// HTML pro (affiché si le client le gère)
+	if htmlBody != "" {
+		m.SetBody("text/html", htmlBody)
+	}
 
 	// Dialer SMTP.
 	d := gomail.NewDialer(smtpHost, smtpPort, smtpUser, smtpPass)
@@ -117,9 +130,60 @@ func SendEmail(to, subject, body string) error {
 }
 
 func SendVerificationEmail(to, code string) error {
-	subject := "Votre code de vérification"
-	body := "Voici votre code : " + code + "\nIl expire dans 5 minutes."
-	return SendEmail(to, subject, body)
+	subject := "Confirmation de votre adresse e‑mail"
+
+	// Texte simple (fallback)
+	textBody := fmt.Sprintf(`Bonjour,
+
+Vous avez demandé un code de vérification pour votre compte.
+
+Votre code : %s
+
+Ce code expire dans 5 minutes.
+Merci de ne pas répondre à cet e‑mail.
+
+Cordialement,
+L’équipe de votre cloud personnel`, code)
+
+	// HTML “pro”
+	htmlBody := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Code de vérification</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #333; background: #f8f9fa; margin: 0; padding: 20px; }
+    .container { max-width: 600px; margin: auto; background: #ffffff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 30px; }
+    .header { text-align: center; padding-bottom: 20px; border-bottom: 1px solid #eee; }
+    .header h1 { margin: 0; color: #1a73e8; font-size: 22px; }
+    .code { background: #f0f8ff; border: 1px dashed #1a73e8; padding: 12px; margin: 20px 0; font-size: 18px; font-weight: bold; text-align: center; }
+    .footer { text-align: center; margin-top: 30px; padding-top: 15px; border-top: 1px solid #eee; color: #777; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Cloud Personnel – Vérification e‑mail</h1>
+    </div>
+
+    <p>Bonjour,</p>
+    <p>Vous avez demandé un code de vérification pour votre compte sur votre environnement cloud personnel.</p>
+
+    <div class="code">%s</div>
+
+    <p>Ce code est valable <strong>5 minutes</strong>. Au-delà, vous devrez en demander un nouveau.</p>
+    <p>Cet e‑mail est généré automatiquement. Merci de ne pas y répondre.</p>
+
+    <div class="footer">
+      <p>Envoyé par votre serveur cloud personnel</p>
+      <p>Adresse : <a href="mailto:cloud@votredomaine.fr">infrastructure.cloud.perso@gmail.com</a></p>
+    </div>
+  </div>
+</body>
+</html>`, code)
+
+	return SendEmail(to, subject, textBody, htmlBody)
 }
 
 func parseTemplates() (*template.Template, error) {
@@ -164,6 +228,7 @@ func connectDB() (*sql.DB, error) {
 func NewUUIDv4() string {
 	return uuid.NewString()
 }
+
 func uploadfilehandle(w http.ResponseWriter, r *http.Request) {
 	// Parse multipart (50MB max)
 	r.ParseMultipartForm(50 << 20)
@@ -2043,6 +2108,136 @@ func ListAllFolderByUsersId(User_id int) ([]int, error) {
 	return Listid, nil
 }
 
+func BackupStorage() error {
+	sourceDir := "../storage/"
+	backupDir := "../backup/"
+	timestamp := time.Now().Format(time.RFC1123)
+	tarFile := filepath.Join(backupDir, "stockage-backup-"+timestamp+".tar.gz")
+
+	// 1. Vérifier sourceDir
+	if _, err := os.Stat(sourceDir); os.IsNotExist(err) {
+		return fmt.Errorf("❌ storage/ introuvable")
+	}
+
+	// 2. Créer backupDir
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return fmt.Errorf("❌ backup/ impossible : %w", err)
+	}
+
+	// 3. Créer TAR.GZ
+	log.Printf("📦 Création .tar.gz : %s", tarFile)
+
+	f, err := os.Create(tarFile)
+	if err != nil {
+		return fmt.Errorf("❌ TAR.GZ impossible : %w", err)
+	}
+	defer f.Close()
+
+	gw := gzip.NewWriter(f)
+	defer gw.Close()
+
+	tw := tar.NewWriter(gw)
+	defer tw.Close()
+
+	// 4. Parcourir et ajouter au TAR.GZ
+	return filepath.WalkDir(sourceDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == sourceDir {
+			return nil
+		}
+
+		relPath, _ := filepath.Rel(sourceDir, path)
+
+		if d.IsDir() {
+			// Dossier dans TAR
+			hdr := &tar.Header{
+				Name:     relPath + "/",
+				Typeflag: tar.TypeDir,
+				Mode:     0755,
+			}
+			return tw.WriteHeader(hdr)
+		}
+
+		// Fichier dans TAR
+		return addFileToTar(tw, path, relPath, d)
+	})
+}
+
+func addFileToTar(tw *tar.Writer, srcPath, relPath string, d fs.DirEntry) error {
+	file, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	info, _ := file.Stat()
+	hdr, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return err
+	}
+	hdr.Name = relPath
+
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+
+	_, err = io.Copy(tw, file)
+	return err
+}
+
+// Fonction helper pour copier un fichier avec io.Copy
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return err
+	}
+
+	// Conserver les permissions originales
+	info, err := sourceFile.Stat()
+	if err == nil {
+		os.Chmod(dst, info.Mode())
+	}
+
+	return nil
+}
+
+func startBackupScheduler() {
+	ticker := time.NewTicker(12 * time.Hour) // Change ici : 30m, 6h, etc.
+	defer ticker.Stop()
+
+	// Backup immédiat au démarrage
+	if err := BackupStorage(); err != nil {
+		log.Println("❌ Premier backup échoué :", err)
+		return
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			log.Println("⏰ Début backup périodique...")
+			if err := BackupStorage(); err != nil {
+				log.Println("❌ Backup échoué :", err)
+			} else {
+				log.Println("✅ Backup terminé")
+			}
+		}
+	}
+}
+
 // main
 func main() {
 	// chargement .env
@@ -2063,6 +2258,9 @@ func main() {
 		println("DB ERROR CONNECTION")
 	}
 	defer db.Close()
+
+	// ✅ NOUVEAU : Lancer les backups périodiques en arrière-plan
+	go startBackupScheduler()
 
 	// router web
 	http.Handle("/css/", http.StripPrefix("/css/", http.FileServer(http.Dir("../frontend/src/css"))))
@@ -2094,4 +2292,9 @@ func main() {
 	log.Println("Serveur sur http://localhost:8080")
 	http.ListenAndServe(":8080", nil)
 
+	// ✅ NOUVEAU : Écoute jusqu'à interruption (Ctrl+C)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit // Attend Ctrl+C
+	log.Println("Arrêt du serveur...")
 }
